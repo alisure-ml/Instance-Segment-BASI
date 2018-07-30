@@ -5,7 +5,7 @@ import tensorflow as tf
 import numpy as np
 
 from BAISTools import Tools
-from BAISData import Data
+from BAISData import Data, CategoryNames
 from BAISPSPNet import PSPNet
 
 
@@ -27,12 +27,15 @@ class Runner(object):
 
         # 网络
         img_placeholder = tf.placeholder(dtype=tf.float32, shape=(None, self.input_size[0], self.input_size[1], 4))
-        net = PSPNet({'data': img_placeholder}, is_training=True, num_classes=1, last_pool_size=self.last_pool_size,
-                     filter_number=32)
+        net = PSPNet({'data': img_placeholder}, is_training=True, num_classes=21, last_pool_size=self.last_pool_size,
+                     filter_number=32, num_segment=1)
 
         # 输出/预测
         raw_output_op = net.layers["conv6_n"]
         sigmoid_output_op = tf.sigmoid(raw_output_op)
+
+        raw_output_classes = net.layers['class_1']
+        pred_classes = tf.cast(tf.argmax(raw_output_classes, axis=-1), tf.int32)
 
         # 启动Session/加载模型
         sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
@@ -43,6 +46,7 @@ class Runner(object):
         raw_output, sigmoid_output = sess.run([raw_output_op, sigmoid_output_op], feed_dict={img_placeholder: final_batch_data})
 
         # 保存
+        print("{} {}".format(pred_classes, CategoryNames[pred_classes]))
         Image.fromarray(np.asarray(np.squeeze(data_raw), dtype=np.uint8)).save(
             os.path.join(self.save_dir, result_filename + "data.png"))
         Tools.print_info('over : result save in {}'.format(os.path.join(self.save_dir, result_filename)))
@@ -69,7 +73,7 @@ if __name__ == '__main__':
 
     image_index = "2007_000121"
     where_index = 0
-    Runner(log_dir="./model_bais/first", save_dir="./output_bais/{}".format(image_index)).run(
+    Runner(log_dir="./model/class/first", save_dir="./output/class/first/{}".format(image_index)).run(
         result_filename="{}_{}_".format(image_index, where_index),
         image_filename="/home/z840/ALISURE/Data/VOC2012/JPEGImages/{}.jpg".format(image_index),
         annotation_filename="/home/z840/ALISURE/Data/VOC2012/SegmentationObject/{}.png".format(image_index), ann_index=where_index)

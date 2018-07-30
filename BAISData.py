@@ -154,7 +154,8 @@ class Data(object):
                 pass
 
             # 图片id, 初始点位置，当前类别，当前掩码
-            [all_ann_data.append([ann_index, num, ann_class[num_index], ann_mask[num_index]]) for num_index, num in enumerate(nums)]
+            [all_ann_data.append([ann_index, num, ann_class[num_index],
+                                  ann_mask[num_index]]) for num_index, num in enumerate(nums)]
             pass
 
         return all_ann_data
