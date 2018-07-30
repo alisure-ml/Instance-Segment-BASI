@@ -25,7 +25,7 @@ class Train(object):
         self.data_train_list = train_list
         self.input_size = input_size
         self.batch_size = batch_size
-        self.num_classes = 20
+        self.num_classes = 21
         self.num_segment = 1
 
         # 和模型相关的参数：必须保证input_size大于8倍的last_pool_size
