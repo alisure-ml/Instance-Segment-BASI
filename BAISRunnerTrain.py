@@ -35,7 +35,7 @@ class Train(object):
 
         # 和模型训练相关的参数
         self.learning_rate = 5e-3
-        self.num_steps = 400001
+        self.num_steps = 500001
 
         # 读取数据
         self.data_reader = Data(data_root_path=data_root_path, data_list=train_list,
@@ -100,14 +100,17 @@ class Train(object):
         accuracy_classes = tcm.accuracy(pred_classes, label_classes_placeholder)
 
         # loss
-        loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(targets=label_batch,
-                                                                               logits=prediction, pos_weight=3))
+        # loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+        #     targets=label_batch, logits=prediction, pos_weight=5))  # train 1 0-100000
+        loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+            targets=label_batch, logits=prediction, pos_weight=3))  # train 2 100000-350000
+
         # 分类损失
         loss_classes = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=label_classes_placeholder,
                                                                                      logits=raw_output_classes))
         # 总损失
-        # loss = tf.add_n([loss_segment, 0.1 * loss_classes])  # first 96000
-        loss = tf.add_n([loss_segment, 0.2 * loss_classes])  # second
+        # loss = tf.add_n([loss_segment, 0.1 * loss_classes])  # train 3 0-100000
+        loss = tf.add_n([loss_segment, 0.2 * loss_classes])  # train 4 100000-200000
 
         # Poly learning rate policy
         step_ph = tf.placeholder(dtype=tf.float32, shape=())
@@ -133,7 +136,8 @@ class Train(object):
             final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask = \
                 self.data_reader.next_batch_train()
 
-            train_op = self.train_classes_op
+            # train_op = self.train_classes_op
+            train_op = self.train_op
 
             if step % 50 == 0:
                 # summary 3
@@ -187,10 +191,10 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    Train(batch_size=8, last_pool_size=50, input_size=[400, 400], log_dir="./model/class/second_avg_pool",
+    Train(batch_size=8, last_pool_size=50, input_size=[400, 400], log_dir="./model/together/first",
           data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/train.txt",
           data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-          is_test=False).train(save_pred_freq=2000, begin_step=96001)
+          is_test=False).train(save_pred_freq=2000, begin_step=200001)
 
     # Train(batch_size=2, last_pool_size=50, input_size=[400, 400], log_dir="./model_bais/test",
     #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
