@@ -11,5 +11,5 @@
 
 4. add attention class 0.2 * loss_classes 200000
 
-5. 同时训练 attention class 和 segment
+5. 同时训练 attention class 和 segment 230000
 

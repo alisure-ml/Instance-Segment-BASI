@@ -115,7 +115,7 @@ class Train(object):
         # Poly learning rate policy
         step_ph = tf.placeholder(dtype=tf.float32, shape=())
         learning_rate = tf.scalar_mul(tf.constant(self.learning_rate), tf.pow((1 - step_ph / self.num_steps), 0.9))
-        train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
+        train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)  # train 5 230000
 
         # 单独训练最后的分类
         classes_trainable = [v for v in tf.trainable_variables() if 'class_attention' in v.name]
@@ -191,10 +191,10 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    Train(batch_size=8, last_pool_size=50, input_size=[400, 400], log_dir="./model/together/first",
+    Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/first",
           data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/train.txt",
           data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-          is_test=False).train(save_pred_freq=2000, begin_step=200001)
+          is_test=False).train(save_pred_freq=2000, begin_step=1)
 
     # Train(batch_size=2, last_pool_size=50, input_size=[400, 400], log_dir="./model_bais/test",
     #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",

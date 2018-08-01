@@ -43,10 +43,12 @@ class Runner(object):
         Tools.restore_if_y(sess, self.log_dir)
 
         # 运行
-        raw_output, sigmoid_output = sess.run([raw_output_op, sigmoid_output_op], feed_dict={img_placeholder: final_batch_data})
+        raw_output, sigmoid_output, raw_output_classes_r, pred_classes_r = sess.run(
+            [raw_output_op, sigmoid_output_op, raw_output_classes, pred_classes],
+            feed_dict={img_placeholder: final_batch_data})
 
         # 保存
-        print("{} {}".format(pred_classes, CategoryNames[pred_classes]))
+        print("{} {} {}".format(pred_classes_r[0], CategoryNames[pred_classes_r[0]], raw_output_classes_r))
         Image.fromarray(np.asarray(np.squeeze(data_raw), dtype=np.uint8)).save(
             os.path.join(self.save_dir, result_filename + "data.png"))
         Tools.print_info('over : result save in {}'.format(os.path.join(self.save_dir, result_filename)))
@@ -71,9 +73,9 @@ class Runner(object):
 
 if __name__ == '__main__':
 
-    image_index = "2007_000121"
+    image_index = "2007_000187"
     where_index = 0
-    Runner(log_dir="./model/class/first", save_dir="./output/class/first/{}".format(image_index)).run(
+    Runner(log_dir="./model/together/first", save_dir="./output/together/first/{}".format(image_index)).run(
         result_filename="{}_{}_".format(image_index, where_index),
         image_filename="/home/z840/ALISURE/Data/VOC2012/JPEGImages/{}.jpg".format(image_index),
         annotation_filename="/home/z840/ALISURE/Data/VOC2012/SegmentationObject/{}.png".format(image_index), ann_index=where_index)
