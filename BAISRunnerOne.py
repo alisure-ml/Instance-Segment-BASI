@@ -34,7 +34,7 @@ class Runner(object):
         raw_output_op = net.layers["conv6_n"]
         sigmoid_output_op = tf.sigmoid(raw_output_op)
 
-        raw_output_classes = net.layers['class_1']
+        raw_output_classes = net.layers['class_attention_fc']
         pred_classes = tf.cast(tf.argmax(raw_output_classes, axis=-1), tf.int32)
 
         # 启动Session/加载模型

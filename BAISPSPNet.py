@@ -244,7 +244,18 @@ class Network(object):
         return tf.image.resize_bilinear(input, size=size, align_corners=True, name=name)
 
     @layer
+    def multiply(self, inputs, name):
+        inputs[0] = tf.nn.relu(inputs[0])
+        return tf.multiply(inputs[0], inputs[1], name=name)
+
+    @layer
+    def squeeze(self, inputs, name):
+        return tf.squeeze(inputs, axis=[1, 2], name=name)
+
+    # old
+    @layer
     def class_attention(self, inputs, ksize, name):
+        inputs[0] = tf.nn.relu(inputs[0])
         inputs = tf.multiply(inputs[0], inputs[1])
         inputs = tf.nn.avg_pool(inputs, ksize=ksize, strides=ksize, padding="VALID")
         inputs = tf.squeeze(inputs, axis=[1, 2], name=name)
@@ -721,9 +732,44 @@ class PSPNet(Network):
          .batch_normalization(relu=True, name='conv5_4_bn')
          .conv(1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n'))
 
-        # 分类
-        (self.feed("conv5_3", "conv6_n")
-         .class_attention(ksize=[1, last_pool_size, last_pool_size, 1], name="class_attention_1")
-         .fc(num_out=num_classes, name="class_1", relu=False))
+        # 分类:attention
 
+        # 1 no ok
+        # (self.feed("conv5_3", "conv6_n")
+        #  .multiply(name="class_attention_multiply")
+        #  .avg_pool(last_pool_size, last_pool_size, last_pool_size, last_pool_size, name="class_attention_pool")
+        #  .squeeze(name="class_attention_squeeze")
+        #  .fc(num_out=num_classes, name="class_attention_fc", relu=False))
+
+        # 2 no ok
+        # (self.feed("conv5_3", "conv6_n")
+        #  .multiply(name="class_attention_multiply")
+        #  .max_pool(last_pool_size, last_pool_size, last_pool_size, last_pool_size, name="class_attention_pool")
+        #  .squeeze(name="class_attention_squeeze")
+        #  .fc(num_out=num_classes, name="class_attention_fc", relu=False))
+
+        # 3 ok
+        pool_ratio = 5
+        pool_size = last_pool_size // pool_ratio
+        (self.feed("conv5_3", "conv6_n")
+         .multiply(name="class_attention_multiply")
+         .avg_pool(pool_size, pool_size, pool_size, pool_size, name="class_attention_pool")
+         .conv(pool_ratio, pool_ratio, filter_number * 16, pool_ratio, pool_ratio, name="class_attention_conv")
+         .squeeze(name="class_attention_squeeze")
+         .fc(num_out=num_classes, name="class_attention_fc", relu=False))
+
+        # 4 no ok
+        # pool_ratio = 5
+        # pool_size = last_pool_size // pool_ratio
+        # (self.feed("conv5_3", "conv6_n")
+        #  .multiply(name="class_attention_multiply")
+        #  .max_pool(pool_size, pool_size, pool_size, pool_size, name="class_attention_pool")
+        #  .conv(pool_ratio, pool_ratio, filter_number * 16, pool_ratio, pool_ratio, name="class_attention_conv")
+        #  .squeeze(name="class_attention_squeeze")
+        #  .fc(num_out=num_classes, name="class_attention_fc", relu=False))
+
+        # old:分类
+        # (self.feed("conv5_3", "conv6_n")
+        #  .class_attention(ksize=[1, last_pool_size, last_pool_size, 1], name="class_attention_1")
+        #  .fc(num_out=num_classes, name="class_attention_fc", relu=False))
     pass

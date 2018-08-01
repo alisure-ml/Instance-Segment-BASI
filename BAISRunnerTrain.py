@@ -34,7 +34,7 @@ class Train(object):
         self.filter_number = 32
 
         # 和模型训练相关的参数
-        self.learning_rate = 1e-2
+        self.learning_rate = 5e-3
         self.num_steps = 400001
 
         # 读取数据
@@ -45,7 +45,7 @@ class Train(object):
         (self.image_placeholder, self.label_segment_placeholder, self.label_classes_placeholder,
          self.raw_output_segment, self.raw_output_classes, self.pred_segment, self.pred_classes,
          self.loss_segment, self.loss_classes, self.loss, self.accuracy_0, self.accuracy_1, self.accuracy_classes,
-         self.step_ph, self.train_op, self.learning_rate) = self.build_net()
+         self.step_ph, self.train_op, self.train_classes_op, self.learning_rate) = self.build_net()
 
         # summary 1
         tf.summary.scalar("loss", self.loss)
@@ -82,7 +82,7 @@ class Train(object):
         net = PSPNet({'data': image_placeholder}, is_training=True, num_classes=self.num_classes,
                      num_segment=self.num_segment, last_pool_size=self.last_pool_size, filter_number=self.filter_number)
         raw_output_segment = net.layers['conv6_n']
-        raw_output_classes = net.layers['class_1']
+        raw_output_classes = net.layers['class_attention_fc']
 
         # Predictions
         prediction = tf.reshape(raw_output_segment, [-1, ])
@@ -106,17 +106,22 @@ class Train(object):
         loss_classes = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=label_classes_placeholder,
                                                                                      logits=raw_output_classes))
         # 总损失
-        loss = tf.add_n([loss_segment, 0.1 * loss_classes])
+        # loss = tf.add_n([loss_segment, 0.1 * loss_classes])  # first 96000
+        loss = tf.add_n([loss_segment, 0.2 * loss_classes])  # second
 
         # Poly learning rate policy
         step_ph = tf.placeholder(dtype=tf.float32, shape=())
         learning_rate = tf.scalar_mul(tf.constant(self.learning_rate), tf.pow((1 - step_ph / self.num_steps), 0.9))
         train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
 
+        # 单独训练最后的分类
+        classes_trainable = [v for v in tf.trainable_variables() if 'class_attention' in v.name]
+        train_classes_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss, var_list=classes_trainable)
+
         return (image_placeholder, label_segment_placeholder, label_classes_placeholder,
                 raw_output_segment, raw_output_classes, pred_segment, pred_classes,
                 loss_segment, loss_classes, loss, accuracy_0, accuracy_1, accuracy_classes,
-                step_ph, train_op, learning_rate)
+                step_ph, train_op, train_classes_op, learning_rate)
 
     def train(self, save_pred_freq, begin_step=0):
         # 加载模型
@@ -128,6 +133,8 @@ class Train(object):
             final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask = \
                 self.data_reader.next_batch_train()
 
+            train_op = self.train_classes_op
+
             if step % 50 == 0:
                 # summary 3
                 (accuracy_0_r, accuracy_1_r, accuracy_classes_r,
@@ -136,7 +143,7 @@ class Train(object):
                  raw_output_r, pred_segment_r, raw_output_classes_r, pred_classes_r,
                  summary_now) = self.sess.run(
                     [self.accuracy_0, self.accuracy_1, self.accuracy_classes,
-                     self.train_op, self.learning_rate,
+                     train_op, self.learning_rate,
                      self.loss_segment, self.loss_classes, self.loss,
                      self.raw_output_segment, self.pred_segment, self.raw_output_classes, self.pred_classes,
                      self.summary_op],
@@ -150,7 +157,7 @@ class Train(object):
                  loss_segment_r, loss_classes_r, loss_r,
                  raw_output_r, pred_segment_r, raw_output_classes_r, pred_classes_r) = self.sess.run(
                     [self.accuracy_0, self.accuracy_1, self.accuracy_classes,
-                     self.train_op, self.learning_rate,
+                     train_op, self.learning_rate,
                      self.loss_segment, self.loss_classes, self.loss,
                      self.raw_output_segment, self.pred_segment, self.raw_output_classes, self.pred_classes],
                     feed_dict={self.step_ph: step, self.image_placeholder: final_batch_data,
@@ -180,13 +187,14 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    Train(batch_size=8, last_pool_size=50, input_size=[400, 400], log_dir="./model/class/first",
+    Train(batch_size=8, last_pool_size=50, input_size=[400, 400], log_dir="./model/class/second_avg_pool",
           data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/train.txt",
           data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-          is_test=False).train(save_pred_freq=2000, begin_step=200001)
+          is_test=False).train(save_pred_freq=2000, begin_step=96001)
 
     # Train(batch_size=2, last_pool_size=50, input_size=[400, 400], log_dir="./model_bais/test",
     #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
     #       data_path="JPEGImages\\", annotation_path = "SegmentationObject\\", class_path = "SegmentationClass\\",
     #       train_list="ImageSets\\Segmentation\\train.txt",
     #       is_test=True).train(save_pred_freq=2, begin_step=0)
+
