@@ -15,6 +15,8 @@
 
 5. 同时训练 attention class 和 segment 230000
 
+6. result in class,segment,together
+
 
 # train 2
 
@@ -22,10 +24,14 @@
 
 1. pos_weight = 3 + attention class 0.2 * loss_classes 同时训练 attention class 和 segment 310000
 
+2. result in begin/first
+
 
 # train 3
 
 0. pool size = 90
 
 1. segment 3 类
+
+2.result in begin/second
 

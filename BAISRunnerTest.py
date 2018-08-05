@@ -54,7 +54,7 @@ class Train(object):
         # 网络
         net = PSPNet({'data': image_placeholder}, is_training=True, num_classes=self.num_classes,
                      num_segment=self.num_segment, last_pool_size=self.last_pool_size, filter_number=self.filter_number)
-        raw_output_segment = net.layers['conv6_n']
+        raw_output_segment = net.layers['conv6_n_3']
         raw_output_classes = net.layers['class_attention_fc']
 
         # Predictions
