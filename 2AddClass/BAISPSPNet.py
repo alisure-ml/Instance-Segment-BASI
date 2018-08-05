@@ -244,12 +244,9 @@ class Network(object):
         return tf.image.resize_bilinear(input, size=size, align_corners=True, name=name)
 
     @layer
-    def multiply(self, inputs, num_segment, segment_place, name):
+    def multiply(self, inputs, name):
         inputs[0] = tf.nn.relu(inputs[0])
-        kernel = inputs[1]
-        if num_segment > 1:
-            kernel = tf.split(kernel, num_or_size_splits=num_segment, axis=-1)[segment_place]
-        return tf.multiply(inputs[0], kernel, name=name)
+        return tf.multiply(inputs[0], inputs[1], name=name)
 
     @layer
     def squeeze(self, inputs, name):
@@ -730,7 +727,7 @@ class PSPNet(Network):
         pool_ratio = 5
         pool_size = last_pool_size // pool_ratio
         (self.feed("conv5_3", "conv6_n")
-         .multiply(num_segment=num_segment, segment_place=1, name="class_attention_multiply")
+         .multiply(name="class_attention_multiply")
          .avg_pool(pool_size, pool_size, pool_size, pool_size, name="class_attention_pool")
          .conv(pool_ratio, pool_ratio, filter_number * 16, pool_ratio, pool_ratio, name="class_attention_conv")
          .squeeze(name="class_attention_squeeze")

@@ -1,5 +1,4 @@
 import os
-import time
 import numpy as np
 import xml.etree.ElementTree as et
 from PIL import Image, ImageDraw, ImageFont
@@ -139,9 +138,6 @@ class Data(object):
                 (image_size[0]//ratio, image_size[1]//ratio)))
             ann_data = np.asarray(Image.open(ann_name).resize((image_size[0]//ratio, image_size[1]//ratio)))
 
-            # 边界当背景
-            ann_data = np.where(ann_data == 255, 0, ann_data)
-
             # 所有的标注数字：其中0为背景，255为边界，其他为物体
             nums = [i for i in range(1, 255) if np.any(ann_data == i)]
 
@@ -149,9 +145,7 @@ class Data(object):
             ann_mask = []
             ann_class = []
             for num in nums:
-                ann_mask_one = np.where(ann_data == num, 128, ann_data)
-                ann_mask_one = (ann_mask_one - 1) // 127
-                ann_mask.append(ann_mask_one)
+                ann_mask.append(np.where(ann_data == num, 1, 0))
                 # 类别信息
                 where_num = np.where(ann_data == num)
                 class_num = class_data[where_num[0][0]][where_num[1][0]]
@@ -204,6 +198,7 @@ class Data(object):
 
         # 生成高斯掩码
         mask = np.exp(-4 * np.log(2) * ((x - x0) ** 2 + (y - y0) ** 2) / sigma ** 2).astype(np.float32)
+
         return mask
 
     # 测试时使用

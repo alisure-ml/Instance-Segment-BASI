@@ -1,7 +1,9 @@
 # Instance-Segment-BASI
 
 
-# train
+# train 1
+
+0. pool size = 50
 
 1. pos_weight=5 训练segment 100000
 
@@ -12,4 +14,18 @@
 4. add attention class 0.2 * loss_classes 200000
 
 5. 同时训练 attention class 和 segment 230000
+
+
+# train 2
+
+0. pool size = 90
+
+1. pos_weight = 3 + attention class 0.2 * loss_classes 同时训练 attention class 和 segment 310000
+
+
+# train 3
+
+0. pool size = 90
+
+1. segment 3 类
 

@@ -26,7 +26,7 @@ class Train(object):
         self.input_size = input_size
         self.batch_size = batch_size
         self.num_classes = 21
-        self.num_segment = 3
+        self.num_segment = 1
 
         # 和模型相关的参数：必须保证input_size大于8倍的last_pool_size
         self.ratio = 8
@@ -44,26 +44,22 @@ class Train(object):
         # 网络
         (self.image_placeholder, self.label_segment_placeholder, self.label_classes_placeholder,
          self.raw_output_segment, self.raw_output_classes, self.pred_segment, self.pred_classes,
-         self.loss_segment, self.loss_classes, self.loss, self.accuracy_segment, self.accuracy_classes,
+         self.loss_segment, self.loss_classes, self.loss, self.accuracy_0, self.accuracy_1, self.accuracy_classes,
          self.step_ph, self.train_op, self.train_classes_op, self.learning_rate) = self.build_net()
 
         # summary 1
         tf.summary.scalar("loss", self.loss)
         tf.summary.scalar("loss_segment", self.loss_segment)
         tf.summary.scalar("loss_classes", self.loss_classes)
-        tf.summary.scalar("accuracy_segment", self.accuracy_segment)
+        tf.summary.scalar("accuracy_0", self.accuracy_0)
+        tf.summary.scalar("accuracy_1", self.accuracy_1)
         tf.summary.scalar("accuracy_classes", self.accuracy_classes)
-
         split = tf.split(self.image_placeholder, num_or_size_splits=4, axis=3)
         tf.summary.image("image", tf.concat(split[0: 3], axis=3))
         tf.summary.image("mask", split[3])
-        tf.summary.image("label", tf.cast(self.label_segment_placeholder * 127, dtype=tf.uint8))
-        split = tf.split(self.raw_output_segment, num_or_size_splits=3, axis=3)
-        tf.summary.image("other class", split[0])
-        tf.summary.image("attention", split[1])
-        tf.summary.image("background", split[2])
-        tf.summary.image("pred_segment", tf.cast(self.pred_segment, dtype=tf.uint8))
-
+        tf.summary.image("label", self.label_segment_placeholder)
+        tf.summary.image("raw_output_segment", self.raw_output_segment)
+        tf.summary.image("pred_segment", tf.cast(self.pred_segment, tf.float32))
         self.summary_op = tf.summary.merge_all()
 
         # sess 和 saver
@@ -78,8 +74,8 @@ class Train(object):
     def build_net(self):
         # 数据
         image_placeholder = tf.placeholder(dtype=tf.float32, shape=(None, self.input_size[0], self.input_size[1], 4))
-        label_segment_placeholder = tf.placeholder(dtype=tf.int32, shape=(None, self.input_size[0] // self.ratio,
-                                                                          self.input_size[1] // self.ratio, 1))
+        label_segment_placeholder = tf.placeholder(dtype=tf.float32, shape=(None, self.input_size[0] // self.ratio,
+                                                                            self.input_size[1] // self.ratio, 1))
         label_classes_placeholder = tf.placeholder(dtype=tf.int32, shape=(None,))
 
         # 网络
@@ -89,33 +85,37 @@ class Train(object):
         raw_output_classes = net.layers['class_attention_fc']
 
         # Predictions
-        prediction = tf.reshape(raw_output_segment, [-1, self.num_segment])
-        pred_segment = tf.cast(tf.expand_dims(tf.argmax(raw_output_segment, axis=-1) * 127, axis=-1), tf.int32)
+        prediction = tf.reshape(raw_output_segment, [-1, ])
+        pred_segment = tf.cast(tf.greater(raw_output_segment, 0.5), tf.int32)
         pred_classes = tf.cast(tf.argmax(raw_output_classes, axis=-1), tf.int32)
 
         # label
         label_batch = tf.image.resize_nearest_neighbor(label_segment_placeholder,
                                                        tf.stack(raw_output_segment.get_shape()[1:3]))
-        label_batch = tf.reshape(label_batch, [-1, ])
+        label_batch = tf.cast(tf.reshape(label_batch, [-1, ]), tf.float32)
 
         # 当前批次的准确率：accuracy
-        accuracy_segment = tf.reduce_mean(tf.cast(tf.equal(pred_segment, label_segment_placeholder), tf.int32))
+        accuracy_1 = tf.reduce_mean(tf.cast(tf.cast(tf.greater(label_batch, 0.5), tf.int32), tf.float32))
+        accuracy_0 = tf.reduce_mean(tf.cast(tf.cast(tf.greater(prediction, 0.5), tf.int32), tf.float32))
         accuracy_classes = tcm.accuracy(pred_classes, label_classes_placeholder)
 
         # loss
-        loss_segment = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=label_batch,
-                                                                                     logits=prediction))
+        # loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+        #     targets=label_batch, logits=prediction, pos_weight=5))  # train 1 0-100000
+        loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+            targets=label_batch, logits=prediction, pos_weight=3))  # train 2 100000-350000
 
         # 分类损失
         loss_classes = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=label_classes_placeholder,
                                                                                      logits=raw_output_classes))
         # 总损失
-        loss = tf.add_n([loss_segment, 0.1 * loss_classes])
+        # loss = tf.add_n([loss_segment, 0.1 * loss_classes])  # train 3 0-100000
+        loss = tf.add_n([loss_segment, 0.2 * loss_classes])  # train 4 100000-200000
 
-        # 学习率策略
+        # Poly learning rate policy
         step_ph = tf.placeholder(dtype=tf.float32, shape=())
         learning_rate = tf.scalar_mul(tf.constant(self.learning_rate), tf.pow((1 - step_ph / self.num_steps), 0.9))
-        train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
+        train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)  # train 5 230000
 
         # 单独训练最后的分类
         classes_trainable = [v for v in tf.trainable_variables() if 'class_attention' in v.name]
@@ -123,7 +123,7 @@ class Train(object):
 
         return (image_placeholder, label_segment_placeholder, label_classes_placeholder,
                 raw_output_segment, raw_output_classes, pred_segment, pred_classes,
-                loss_segment, loss_classes, loss, accuracy_segment, accuracy_classes,
+                loss_segment, loss_classes, loss, accuracy_0, accuracy_1, accuracy_classes,
                 step_ph, train_op, train_classes_op, learning_rate)
 
     def train(self, save_pred_freq, begin_step=0):
@@ -141,12 +141,12 @@ class Train(object):
 
             if step % 50 == 0:
                 # summary 3
-                (accuracy_segment_r, accuracy_classes_r,
+                (accuracy_0_r, accuracy_1_r, accuracy_classes_r,
                  _, learning_rate_r,
                  loss_segment_r, loss_classes_r, loss_r,
                  raw_output_r, pred_segment_r, raw_output_classes_r, pred_classes_r,
                  summary_now) = self.sess.run(
-                    [self.accuracy_segment, self.accuracy_classes,
+                    [self.accuracy_0, self.accuracy_1, self.accuracy_classes,
                      train_op, self.learning_rate,
                      self.loss_segment, self.loss_classes, self.loss,
                      self.raw_output_segment, self.pred_segment, self.raw_output_classes, self.pred_classes,
@@ -156,11 +156,11 @@ class Train(object):
                                self.label_classes_placeholder: final_batch_class})
                 self.summary_writer.add_summary(summary_now, global_step=step)
             else:
-                (accuracy_segment_r, accuracy_classes_r,
+                (accuracy_0_r, accuracy_1_r, accuracy_classes_r,
                  _, learning_rate_r,
                  loss_segment_r, loss_classes_r, loss_r,
                  raw_output_r, pred_segment_r, raw_output_classes_r, pred_classes_r) = self.sess.run(
-                    [self.accuracy_segment, self.accuracy_classes,
+                    [self.accuracy_0, self.accuracy_1, self.accuracy_classes,
                      train_op, self.learning_rate,
                      self.loss_segment, self.loss_classes, self.loss,
                      self.raw_output_segment, self.pred_segment, self.raw_output_classes, self.pred_classes],
@@ -177,9 +177,9 @@ class Train(object):
             duration = time.time() - start_time
 
             Tools.print_info(
-                'step {:d} loss={:.3f} seg={:.3f} class={:.3f} acc={:.3f} acc_class={:.3f}'
+                'step {:d} loss={:.3f} seg={:.3f} class={:.3f} acc={:.3f} acc={:.3f} acc_class={:.3f}'
                 ' lr={:.6f} ({:.3f} s/step) {} {}'.format(
-                    step, loss_r, loss_segment_r, loss_classes_r, accuracy_segment_r, accuracy_classes_r,
+                    step, loss_r, loss_segment_r, loss_classes_r, accuracy_0_r, accuracy_1_r, accuracy_classes_r,
                     learning_rate_r, duration, list(final_batch_class), list(pred_classes_r)))
 
             pass
@@ -191,14 +191,14 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    # Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/first",
-    #       data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/train.txt",
-    #       data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-    #       is_test=False).train(save_pred_freq=2000, begin_step=1)
+    Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/first",
+          data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/train.txt",
+          data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
+          is_test=False).train(save_pred_freq=2000, begin_step=1)
 
-    Train(batch_size=2, last_pool_size=50, input_size=[400, 400], log_dir="./model/begin/first",
-          data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
-          data_path="JPEGImages\\", annotation_path="SegmentationObject\\", class_path="SegmentationClass\\",
-          train_list="ImageSets\\Segmentation\\train.txt",
-          is_test=True).train(save_pred_freq=2, begin_step=0)
+    # Train(batch_size=2, last_pool_size=50, input_size=[400, 400], log_dir="./model_bais/test",
+    #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
+    #       data_path="JPEGImages\\", annotation_path = "SegmentationObject\\", class_path = "SegmentationClass\\",
+    #       train_list="ImageSets\\Segmentation\\train.txt",
+    #       is_test=True).train(save_pred_freq=2, begin_step=0)
 
