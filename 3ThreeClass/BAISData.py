@@ -19,7 +19,7 @@ class Data(object):
     def __init__(self, data_list="ImageSets\\Segmentation\\train.txt", data_path="JPEGImages\\",
                  data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
                  annotation_path="SegmentationObject\\", class_path="SegmentationClass\\",
-                 batch_size=4, image_size=(720, 720), ratio=8, is_test=False, has_255=False):
+                 batch_size=4, image_size=(720, 720), ratio=8, is_test=False):
 
         self.batch_size = batch_size
         self.image_size = image_size
@@ -36,8 +36,7 @@ class Data(object):
             pass
 
         # 拆解标签
-        self._annotations = self._read_annotation(self._annotation_list, self._class_list,
-                                                  self.image_size, self.ratio, has_255)
+        self._annotations = self._read_annotation(self._annotation_list, self._class_list, self.image_size, self.ratio)
         # 读取数据
         self._images_data = self._read_image(self._data_list, self.image_size)
 
@@ -130,7 +129,7 @@ class Data(object):
         return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask
 
     @staticmethod
-    def _read_annotation(annotation_list, class_list, image_size, ratio, has_255=False):
+    def _read_annotation(annotation_list, class_list, image_size, ratio):
 
         all_ann_data = []
 
@@ -141,11 +140,7 @@ class Data(object):
             ann_data = np.asarray(Image.open(ann_name).resize((image_size[0]//ratio, image_size[1]//ratio)))
 
             # 边界当背景
-            if has_255:
-                ann_data = np.where(ann_data == 255, 171, ann_data)  # 2
-            else:
-                ann_data = np.where(ann_data == 255, 0, ann_data)
-                pass
+            ann_data = np.where(ann_data == 255, 0, ann_data)
 
             # 所有的标注数字：其中0为背景，255为边界，其他为物体
             nums = [i for i in range(1, 255) if np.any(ann_data == i)]
@@ -154,16 +149,9 @@ class Data(object):
             ann_mask = []
             ann_class = []
             for num in nums:
-                # 掩码信息
-                if has_255:
-                    ann_mask_one = np.where(ann_data == num, 85, ann_data)  # 1
-                    ann_mask_one = (ann_mask_one - 1) // 84
-                else:
-                    ann_mask_one = np.where(ann_data == num, 128, ann_data)  # 1
-                    ann_mask_one = (ann_mask_one - 1) // 127
-                    pass
+                ann_mask_one = np.where(ann_data == num, 128, ann_data)
+                ann_mask_one = (ann_mask_one - 1) // 127
                 ann_mask.append(ann_mask_one)
-
                 # 类别信息
                 where_num = np.where(ann_data == num)
                 class_num = class_data[where_num[0][0]][where_num[1][0]]

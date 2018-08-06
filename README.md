@@ -33,5 +33,15 @@
 
 1. segment 3 类
 
-2.result in begin/second
+2. result in begin/second
+
+
+# train 4
+
+0. segment border
+
+1. segment 4 类
+
+2. result in begin/third
+
 
