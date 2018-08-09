@@ -47,6 +47,26 @@
 2. result in begin/third
 
 
+# GUI
+
+
+* 输入的三种方式：
+
+    1. 图片路径
+    2. 图片数据
+    3. 网路路径
+
+* 操作步骤
+    1. click
+    2. ok
+
+* result
+
+input | output
+:-----:|:-----:
+![input](./readme/basi-gui-input.png) | ![input](./readme/basi-gui-result.png)
+
+
 # Idea
 
 1. 边界和attention的权重
