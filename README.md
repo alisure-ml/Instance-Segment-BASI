@@ -1,7 +1,9 @@
 # Instance-Segment-BASI
 
 
-# train 1
+# train
+
+## train 1
 
 0. pool size = 50
 
@@ -18,7 +20,7 @@
 6. result in class,segment,together
 
 
-# train 2
+## train 2
 
 0. pool size = 90
 
@@ -27,7 +29,7 @@
 2. result in begin/first
 
 
-# train 3
+## train 3
 
 0. pool size = 90
 
@@ -36,12 +38,22 @@
 2. result in begin/second
 
 
-# train 4
+## train 4
 
 0. segment border
 
 1. segment 4 类
 
 2. result in begin/third
+
+
+# Idea
+
+1. 边界和attention的权重
+
+2. 用一个小的对抗网络判断是否完成
+
+3. 对给定点所在的对象分割和分类、给两个点判断是否属于一个对象、给定点判断是否属于前景
+
 
 
