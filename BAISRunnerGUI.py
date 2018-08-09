@@ -117,7 +117,7 @@ if __name__ == '__main__':
 
     # image_filename_or_data = "./input/2.jpg"
     # _image_filename_or_data = np.array(Image.open("./input/2.jpg"))
-    _image_filename_or_data = sio.imread("")
+    _image_filename_or_data = sio.imread("http://farm1.staticflickr.com/169/417836491_5bf8762150_z.jpg")
 
     RunnerGUI(log_dir="./model/begin/third").run(_image_filename_or_data, mask_color=list([255, 0, 0]), opacity=0.5)
 
