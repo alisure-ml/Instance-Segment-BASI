@@ -219,11 +219,17 @@ class Data(object):
         return mask
 
     # 测试时使用
+    # 四种用途：图片名称+标注/图片数据+标注/图片名称/图片数据
     @staticmethod
-    def load_image(image_filename, where=None, annotation_filename=None, ann_index=0, image_size=(720, 720)):
+    def load_image(image_filename_or_data_raw, where=None,
+                   annotation_filename=None, ann_index=0, image_size=(720, 720)):
 
         # 读取数据
-        data_raw = np.asarray(Image.open(image_filename).resize(image_size), dtype=np.float32)
+        if isinstance(image_filename_or_data_raw, str):
+            data_raw = np.asarray(Image.open(image_filename_or_data_raw).resize(image_size), dtype=np.float32)
+        else:
+            data_raw = np.asarray(Image.fromarray(image_filename_or_data_raw).resize(image_size), dtype=np.float32)
+
         # 减均值
         # data_data = data_raw - IGM_MEAN
         data_data = data_raw / 255

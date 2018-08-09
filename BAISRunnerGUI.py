@@ -1,5 +1,6 @@
 import os
 from PIL import Image
+from skimage import io as sio
 import numpy as np
 from matplotlib import pyplot as plt
 import tensorflow as tf
@@ -44,44 +45,67 @@ class RunnerGUI(object):
 
         return sess, img_placeholder, predict_output_op, pred_classes
 
-    def run(self, image_filename):
+    def run(self, image_filename_or_data, mask_color, opacity):
 
         plt.ion()
         plt.axis('off')
 
-        image = np.array(Image.open(image_filename))
-        plt.imshow(image)
-        plt.title('Click the four extreme points of the objects')
+        if isinstance(image_filename_or_data, str):
+            image_data = np.array(Image.open(image_filename_or_data))
+        elif isinstance(image_filename_or_data, list) or isinstance(image_filename_or_data, np.ndarray):
+            image_data = image_filename_or_data
+        else:
+            print("image_filename_or_data is error")
+            return
 
-        while 1:
-            object_point = np.array(plt.ginput(1, timeout=0)).astype(np.int)[0]
-            where = [int(self.input_size[0] * object_point[0] / len(image)),
-                     int(self.input_size[1] * object_point[1] / len(image[0]))]
-            print("point=[{},{}] where=[{},{}]".format(object_point[0], object_point[1], where[0], where[1]))
+        plt.imshow(image_data)
+        plt.title('Click one point of the object that you interested')
 
-            final_batch_data, data_raw, gaussian_mask = Data.load_image(image_filename, where=where,
-                                                                        image_size=self.input_size)
+        try:
 
-            print("begin to run ...")
+            while 1:
+                object_point = np.array(plt.ginput(1, timeout=0)).astype(np.int)[0]
+                where = [int(self.input_size[0] * object_point[1] / len(image_data)),
+                         int(self.input_size[1] * object_point[0] / len(image_data[0]))]
+                print("point=[{},{}] where=[{},{}]".format(object_point[0], object_point[1], where[0], where[1]))
 
-            # 运行
-            predict_output_r, pred_classes_r = self.sess.run([self.predict_output, self.pred_classes],
-                                                             feed_dict={self.img_placeholder: final_batch_data})
+                final_batch_data, data_raw, gaussian_mask = Data.load_image(image_data, where=where,
+                                                                            image_size=self.input_size)
 
-            print("end run")
+                print("begin to run ...")
 
-            # 类别
-            print("the class is {}({})".format(pred_classes_r[0], CategoryNames[pred_classes_r[0]]))
+                # 运行
+                predict_output_r, pred_classes_r = self.sess.run([self.predict_output, self.pred_classes],
+                                                                 feed_dict={self.img_placeholder: final_batch_data})
 
-            # 分割
-            results = np.squeeze(np.asarray(predict_output_r[0] * 255 // 4, dtype=np.uint8))
-            results = np.resize(results, new_shape=(len(image), len(image[0])))
+                print("end run")
 
-            plt.imshow(results)
+                # 类别
+                print("the class is {}({})".format(pred_classes_r[0], CategoryNames[pred_classes_r[0]]))
 
-            # final_result = np.concatenate([image, np.expand_dims(results, axis=3)], axis=-1)
-            # plt.imshow(final_result)
+                # 分割
+                segment = np.squeeze(np.asarray(np.where(predict_output_r[0] == 1, 1, 0), dtype=np.uint8))
+                segment = np.asarray(Image.fromarray(segment).resize((len(image_data[0]), len(image_data))))
 
+                image_mask = np.ndarray(image_data.shape)
+                image_mask[:, :, 0] = (1 - segment) * image_data[:, :, 0] + segment * (
+                    opacity * mask_color[0] + (1 - opacity) * image_data[:, :, 0])
+                image_mask[:, :, 1] = (1 - segment) * image_data[:, :, 1] + segment * (
+                    opacity * mask_color[1] + (1 - opacity) * image_data[:, :, 1])
+                image_mask[:, :, 2] = (1 - segment) * image_data[:, :, 2] + segment * (
+                    opacity * mask_color[2] + (1 - opacity) * image_data[:, :, 2])
+
+                plt.clf()  # clear image
+                plt.text(len(image_data[0]) // 2 - 10, -6, CategoryNames[pred_classes_r[0]], fontsize=15)
+                plt.imshow(image_mask.astype(np.uint8))
+
+                print("")
+                pass
+
+        except Exception:
+            print("..................")
+            print("...... close .....")
+            print("..................")
             pass
 
         pass
@@ -91,6 +115,10 @@ class RunnerGUI(object):
 
 if __name__ == '__main__':
 
-    RunnerGUI(log_dir="./model/begin/third").run(image_filename="./input/8.jpg")
+    # image_filename_or_data = "./input/2.jpg"
+    # _image_filename_or_data = np.array(Image.open("./input/2.jpg"))
+    _image_filename_or_data = sio.imread("")
+
+    RunnerGUI(log_dir="./model/begin/third").run(_image_filename_or_data, mask_color=list([255, 0, 0]), opacity=0.5)
 
     pass
