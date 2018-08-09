@@ -724,12 +724,12 @@ class PSPNet(Network):
          .concat(axis=-1, name='conv5_3_concat')
          .conv(3, 3, output_filter_number, 1, 1, biased=False, relu=False, padding='SAME', name='conv5_4')
          .batch_normalization(relu=True, name='conv5_4_bn')
-         .conv(1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_3'))
+         .conv(1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_4'))
 
         # 分类:attention
         pool_ratio = 5
         pool_size = last_pool_size // pool_ratio
-        (self.feed("conv5_3", "conv6_n_3")
+        (self.feed("conv5_3", "conv6_n_4")
          .multiply(num_segment=num_segment, segment_place=1, name="class_attention_multiply")
          .avg_pool(pool_size, pool_size, pool_size, pool_size, name="class_attention_pool")
          .conv(pool_ratio, pool_ratio, filter_number * 16, pool_ratio, pool_ratio, name="class_attention_conv")

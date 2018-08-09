@@ -148,7 +148,7 @@ class Data(object):
                 pass
 
             # 所有的标注数字：其中0为背景，255为边界，其他为物体
-            nums = [i for i in range(1, 255) if np.any(ann_data == i)]
+            nums = [i for i in range(1, 255) if np.any(ann_data == i) and i != 171]
 
             # 所有标签的掩码和类别
             ann_mask = []
@@ -268,57 +268,6 @@ class Data(object):
 
     pass
 
-
-class Annotation(object):
-
-    def __init__(self,
-                 data_list="ImageSets\\Segmentation\\train.txt", data_path="JPEGImages\\",
-                 data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
-                 annotation_path="SegmentationObject\\", xml_path="Annotations\\"):
-
-        data_list, annotation_list = Data._read_list(data_root_path, data_list, data_path, annotation_path)
-
-        for image_file_name in annotation_list:
-            xml_file_name = data_root_path + xml_path + os.path.basename(image_file_name).split(".")[0] + ".xml"
-            object_annotation = self._get_object_annotation(xml_file_name)
-            self._draw_annotation(object_annotation, image_file_name)
-        pass
-
-    @staticmethod
-    def _draw_annotation(object_annotation, image_file_name):
-        im = Image.open(image_file_name).convert("RGB")
-        draw = ImageDraw.Draw(im)
-        font = ImageFont.truetype("simhei.ttf", 15, encoding="utf-8")
-
-        for object_one in object_annotation:
-            object_type = CategoryNames[object_one[0]]
-            x_min, y_min, x_max, y_max = object_one[1:]
-            point = [(x_min, y_min), (x_min, y_max), (x_max, y_min), (x_max, y_max)]
-
-            draw.line((point[0], point[1]), fill=(255, 0, 0), width=2)
-            draw.line((point[1], point[3]), fill=(255, 0, 0), width=2)
-            draw.line((point[3], point[2]), fill=(255, 0, 0), width=2)
-            draw.line((point[2], point[0]), fill=(255, 0, 0), width=2)
-            draw.text((point[0][0], point[0][1] - 20), object_type, (255, 0, 0), font=font)
-            pass
-
-        im.show(im)
-        pass
-
-    @staticmethod
-    def _get_object_annotation(xml_file_name):
-        reuslt = []
-        tree = et.parse(xml_file_name)
-        object_all = tree.getroot().findall("object")
-        for object_one in object_all:
-            object_type = CategoryNames.index(object_one.find("name").text)
-            bndbox = object_one.find("bndbox")
-            reuslt.append([object_type, int(bndbox.find("xmin").text), int(bndbox.find("ymin").text),
-                           int(bndbox.find("xmax").text), int(bndbox.find("ymax").text)])
-            pass
-        return reuslt
-
-    pass
 
 if __name__ == '__main__':
     # _data = Data(data_root_path="/home/z840/ALISURE/Data/VOC2012/",

@@ -31,7 +31,7 @@ class Runner(object):
                      filter_number=32, num_segment=1)
 
         # 输出/预测
-        raw_output_op = net.layers["conv6_n_3"]
+        raw_output_op = net.layers["conv6_n_4"]
         sigmoid_output_op = tf.sigmoid(raw_output_op)
 
         raw_output_classes = net.layers['class_attention_fc']

@@ -91,7 +91,7 @@ class Train(object):
         # 网络
         net = PSPNet({'data': image_placeholder}, is_training=True, num_classes=self.num_classes,
                      num_segment=self.num_segment, last_pool_size=self.last_pool_size, filter_number=self.filter_number)
-        raw_output_segment = net.layers['conv6_n_3']
+        raw_output_segment = net.layers['conv6_n_4']
         raw_output_classes = net.layers['class_attention_fc']
 
         # Predictions
@@ -197,14 +197,14 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    # Train(batch_size=3, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/third",
-    #       data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/trainval.txt",
-    #       data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-    #       is_test=False).train(save_pred_freq=2000, begin_step=1)
+    Train(batch_size=3, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/third",
+          data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/trainval.txt",
+          data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
+          is_test=False).train(save_pred_freq=2000, begin_step=34001)
 
-    Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/third",
-          data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
-          data_path="JPEGImages\\", annotation_path="SegmentationObject\\", class_path="SegmentationClass\\",
-          train_list="ImageSets\\Segmentation\\train.txt",
-          is_test=True).train(save_pred_freq=2, begin_step=0)
+    # Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/third",
+    #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
+    #       data_path="JPEGImages\\", annotation_path="SegmentationObject\\", class_path="SegmentationClass\\",
+    #       train_list="ImageSets\\Segmentation\\train.txt",
+    #       is_test=True).train(save_pred_freq=2, begin_step=0)
 
