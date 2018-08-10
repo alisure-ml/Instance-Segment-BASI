@@ -390,7 +390,6 @@ class COCOData(object):
         final_batch_class = [one_ann["category_id"] for one_ann in batch_ann]
 
         self._now += 1
-        print(final_batch_class)
         return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_ann_mask
 
     @staticmethod
