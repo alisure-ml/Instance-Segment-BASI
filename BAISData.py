@@ -1,5 +1,6 @@
 import os
 import time
+from skimage import io as sio
 from pycocotools.coco import COCO
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -12,19 +13,6 @@ CategoryNames = ['background',
                   'bus', 'car', 'cat', 'chair', 'cow',
                   'diningtable', 'dog', 'horse', 'motorbike', 'person',
                   'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
-
-CategoryNamesCOCO = [
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic", "light", "fire", "hydrant", "stop", "sign", "parking", "meter", "bench", "bird",
-    "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
-    "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports", "ball",
-    "kite", "baseball", "bat", "baseball", "glove", "skateboard", "surfboard", "tennis", "racket",
-    "bottle", "wine", "glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
-    "orange", "broccoli", "carrot", "hot", "dog", "pizza", "donut", "cake", "chair", "couch", "potted",
-    "plant", "bed", "dining", "table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell",
-    "phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-    "teddy", "bear", "hair", "drier", "toothbrush"
-]
 
 
 class Data(object):
@@ -297,7 +285,7 @@ class Data(object):
 
 class COCOData(object):
 
-    def __init__(self, data_root_path="C:\\ALISURE\\DataModel\\Data\\COCO", data_path="",
+    def __init__(self, data_root_path="C:\\ALISURE\\DataModel\\Data\\COCO",
                  annotation_path="annotations_trainval2014\\annotations", data_type="val2014",
                  batch_size=4, image_size=(720, 720), ratio=8):
 
@@ -306,10 +294,10 @@ class COCOData(object):
         self.ratio = ratio
         self.num_segment = 3
         self.attention_class = 2
-        self.num_classes = 80
+        self.num_classes = 91
 
         # 读取数据
-        self.img_path = os.path.join(data_root_path, data_path, data_type)
+        self.img_path = os.path.join(data_root_path, data_type)
         self.ann_file = os.path.join(data_root_path, annotation_path, "instances_{}.json".format(data_type))
 
         self.coco = COCO(self.ann_file)
@@ -329,8 +317,8 @@ class COCOData(object):
         pass
 
     @staticmethod
-    def get_category_name(cat_id):
-        return CategoryNamesCOCO[cat_id]
+    def get_category_name(coco, cat_id):
+        return coco.cats[cat_id]["name"]
 
     def next_batch_train(self):
         # 打乱标签
@@ -351,28 +339,39 @@ class COCOData(object):
         batch_ann_mask = []
 
         # 选取初始点的位置
+        _batch_ann_attention = []
         for ann_index, ann in enumerate(batch_ann):
-            # attention is 2
-            anns_this = self.coco.annToMask(self.coco.loadAnns(ann["id"])[0])
-            batch_ann_data.append(anns_this)
-            where = np.argwhere(anns_this == 1)
+            # attention
+            anns_attention = self.coco.annToMask(self.coco.loadAnns(ann["id"])[0])
+            _batch_ann_attention.append(anns_attention)
+            batch_ann_data.append(np.zeros(anns_attention.shape, dtype=np.uint8))
+            where = np.argwhere(anns_attention == 1)
             where = where[np.random.randint(0, len(where))]
             batch_ann_where.append(where)
             pass
 
-        # other is 1
+        # ann 类别
         for ann_index, ann in enumerate(batch_ann):
             for ann_id in ann["ann_ids"]:
                 load_anns = self.coco.loadAnns(ann_id)
                 batch_ann_data[ann_index] += self.coco.annToMask(load_anns[0])
+            # bg is 0, other is 1, attention is 2
+            batch_ann_data[ann_index] = np.where(batch_ann_data[ann_index] > 0, 1, 0)
+            batch_ann_data[ann_index] = np.where(_batch_ann_attention[ann_index] > 0, 2, batch_ann_data[ann_index])
             pass
 
-        # resize
-        for ann_index, _ in enumerate(batch_ann):
-            batch_ann_data[ann_index] = np.asarray(Image.fromarray(batch_ann_data[ann_index]).resize((
-                self.image_size[0] // self.ratio, self.image_size[1] // self.ratio)))
-            batch_ann_where[ann_index][0] = self.image_size[0] / len(anns_this) * batch_ann_where[ann_index][0]
-            batch_ann_where[ann_index][1] = self.image_size[1] / len(anns_this[0]) * batch_ann_where[ann_index][1]
+        # 数据 and resize
+        batch_data = []
+        for ann_index, ann in enumerate(batch_ann):
+            batch_data.append(np.asarray(Image.open(ann["file_name"]).resize(self.image_size)) / 255)
+            # batch_data.append(np.zeros(shape=(self.image_size[0], self.image_size[1], 3)))
+
+            batch_ann_data[ann_index] = np.asarray(
+                Image.fromarray(np.asarray(batch_ann_data[ann_index], dtype=np.uint8)).resize(
+                    (self.image_size[0] // self.ratio, self.image_size[1] // self.ratio)))
+
+            batch_ann_where[ann_index][0] = self.image_size[0] / len(_batch_ann_attention[ann_index]) * batch_ann_where[ann_index][0]
+            batch_ann_where[ann_index][1] = self.image_size[1] / len(_batch_ann_attention[ann_index][0]) * batch_ann_where[ann_index][1]
             pass
 
         # 根据初始点生成高斯Mask
@@ -380,21 +379,18 @@ class COCOData(object):
             batch_ann_mask.append(self._mask_gaussian(self.image_size, batch_ann_where[ann_index]))
             pass
 
-        # 数据
-        # batch_data = [io.imread(ann["file_name"]) for ann in batch_ann]
-        batch_data = [np.zeros(shape=(self.image_size[0], self.image_size[1], 3)) for _ in batch_ann]
-
         # 数据+MASK
         final_batch_data = [np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2)
                             for one_data, one_mask in zip(batch_data, batch_ann_mask)]
 
         # 标注
-        final_batch_ann = [np.expand_dims(one_ann, 2) for one_ann in batch_ann_mask]
+        final_batch_ann = [np.expand_dims(one_ann, 2) for one_ann in batch_ann_data]
 
         # 类别
         final_batch_class = [one_ann["category_id"] for one_ann in batch_ann]
 
         self._now += 1
+        print(final_batch_class)
         return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_ann_mask
 
     @staticmethod
@@ -415,11 +411,16 @@ class COCOData(object):
 
 
 if __name__ == '__main__':
-    # _data = Data(data_root_path="/home/z840/ALISURE/Data/VOC2012/",
-    #              data_path="JPEGImages/", annotation_path="SegmentationObject/",
-    #              data_list="ImageSets/Segmentation/train.txt")
-    _data = Data(is_test=True)
-    for i in range(20):
-        final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask = _data.next_batch_train()
-        _data.next_batch_test(i)
+    # _data = Data(is_test=True)
+    # for i in range(20):
+    #     _data.next_batch_train()
+    #     _data.next_batch_test(i)
+    #     pass
+
+    data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/COCO",
+                           annotation_path="annotations_trainval2014/annotations",
+                           data_type="val2014", batch_size=3, image_size=[720, 720])
+    for i in range(200):
+        data_reader.next_batch_train()
         pass
+

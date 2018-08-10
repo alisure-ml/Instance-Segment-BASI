@@ -84,8 +84,8 @@ class Train(object):
         net = PSPNet({'data': image_placeholder}, is_training=True, num_classes=self.num_classes,
                      attention_class=self.attention_class, num_segment=self.num_segment,
                      last_pool_size=self.last_pool_size, filter_number=self.filter_number)
-        raw_output_segment = net.layers['conv6_n_coco']
-        raw_output_classes = net.layers['class_attention_fc']
+        raw_output_segment = net.layers['conv6_n_3_coco']
+        raw_output_classes = net.layers['class_attention_fc_coco']
 
         # Predictions
         prediction = tf.reshape(raw_output_segment, [-1, self.num_segment])
@@ -190,8 +190,8 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    is_win = True
-    is_voc = True
+    is_win = False
+    is_voc = False
 
     if is_win:
         if is_voc:
@@ -202,25 +202,25 @@ if __name__ == '__main__':
                                class_path="SegmentationClass\\", batch_size=3, image_size=[720, 720], is_test=False)
         else:
             data_reader = COCOData(data_root_path="C:\\ALISURE\\DataModel\\Data\\COCO",
-                                   data_path="", annotation_path="annotations_trainval2014\\annotations",
+                                   annotation_path="annotations_trainval2014\\annotations",
                                    data_type="val2014", batch_size=3, image_size=[720, 720])
             pass
 
-        Train(log_dir="./model/begin/third", data=data_reader, is_test=True).train(save_pred_freq=2, begin_step=0)
+        Train(log_dir="./model/coco/first", data=data_reader, is_test=True).train(save_pred_freq=2, begin_step=0)
     else:
         if is_voc:
             data_reader = Data(data_root_path="/home/z840/ALISURE/Data/VOC2012/",
                                data_list="ImageSets/Segmentation/trainval.txt",
                                data_path="JPEGImages/", annotation_path="SegmentationObject/",
-                               class_path="SegmentationClass/", batch_size=3, image_size=[720, 720], is_test=False)
+                               class_path="SegmentationClass/", batch_size=3, image_size=[720, 720],
+                               is_test=False, has_border=True)
         else:
-            data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/VOC2012/",
-                                   data_path="JPEGImages/", annotation_path="SegmentationObject/",
-                                   data_type="SegmentationClass/", batch_size=3, image_size=[720, 720])
+            data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/COCO",
+                                   annotation_path="annotations_trainval2014/annotations",
+                                   data_type="val2014", batch_size=3, image_size=[720, 720])
             pass
 
-        Train(log_dir="./model/begin/third", data=data_reader, is_test=False).train(save_pred_freq=2000,
-                                                                                    begin_step=34001)
+        Train(log_dir="./model/coco/first", data=data_reader, is_test=False).train(save_pred_freq=2000, begin_step=1)
         pass
 
     pass
