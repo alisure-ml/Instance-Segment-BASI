@@ -33,7 +33,7 @@ class Train(object):
         self.last_pool_size = self.input_size[0] // self.ratio
         self.filter_number = 32
         self.learning_rate = 5e-3
-        self.num_steps = 500001
+        self.num_steps = 1000001
         self.print_step = 1 if is_test else 25
 
         # 网络
@@ -217,7 +217,7 @@ if __name__ == '__main__':
         else:
             data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/COCO",
                                    annotation_path="annotations_trainval2014/annotations",
-                                   data_type="val2014", batch_size=3, image_size=[720, 720])
+                                   data_type="train2014", batch_size=2, image_size=[720, 720])
             pass
 
         Train(log_dir="./model/coco/first", data=data_reader, is_test=False).train(save_pred_freq=2000, begin_step=1)
