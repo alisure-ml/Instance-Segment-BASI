@@ -31,7 +31,7 @@ def layer(op):
 
 class Network(object):
 
-    def __init__(self, inputs, num_classes, num_segment, trainable=True,
+    def __init__(self, inputs, num_classes, num_segment, attention_class, trainable=True,
                  is_training=False, last_pool_size=90, filter_number=64):
 
         # The input nodes for this network
@@ -45,10 +45,10 @@ class Network(object):
         # Switch variable for dropout
         self.use_dropout = tf.placeholder_with_default(tf.constant(1.0), shape=[], name='use_dropout')
         self.is_training = is_training
-        self.setup(is_training, num_classes, num_segment, last_pool_size, filter_number)
+        self.setup(is_training, num_classes, num_segment, attention_class, last_pool_size, filter_number)
         pass
 
-    def setup(self, is_training, num_classes, num_segment, last_pool_min_size, filter_number):
+    def setup(self, is_training, num_classes, num_segment, attention_class, last_pool_min_size, filter_number):
         '''Construct the network. '''
         raise NotImplementedError('Must be implemented by the subclass.')
 
@@ -260,7 +260,7 @@ class Network(object):
 
 class PSPNet(Network):
 
-    def setup(self, is_training, num_classes, num_segment, last_pool_size, filter_number):
+    def setup(self, is_training, num_classes, num_segment, attention_class, last_pool_size, filter_number):
         (self.feed('data')
          .conv(3, 3, filter_number, 2, 2, biased=False, relu=False, padding='SAME', name='conv1_1_3x3_s2_n')
          .batch_normalization(relu=False, name='conv1_1_3x3_s2_bn')
@@ -724,13 +724,13 @@ class PSPNet(Network):
          .concat(axis=-1, name='conv5_3_concat')
          .conv(3, 3, output_filter_number, 1, 1, biased=False, relu=False, padding='SAME', name='conv5_4')
          .batch_normalization(relu=True, name='conv5_4_bn')
-         .conv(1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_4'))
+         .conv(1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_coco'))
 
         # 分类:attention
         pool_ratio = 5
         pool_size = last_pool_size // pool_ratio
-        (self.feed("conv5_3", "conv6_n_4")
-         .multiply(num_segment=num_segment, segment_place=1, name="class_attention_multiply")
+        (self.feed("conv5_3", "conv6_n_coco")
+         .multiply(num_segment=num_segment, segment_place=attention_class, name="class_attention_multiply")
          .avg_pool(pool_size, pool_size, pool_size, pool_size, name="class_attention_pool")
          .conv(pool_ratio, pool_ratio, filter_number * 16, pool_ratio, pool_ratio, name="class_attention_conv")
          .squeeze(name="class_attention_squeeze")

@@ -8,42 +8,34 @@ import tensorflow.contrib.metrics as tcm
 
 from BAISPSPNet import PSPNet
 from BAISTools import Tools
-from BAISData import Data
+from BAISData import Data, COCOData
 
 
 class Train(object):
 
-    def __init__(self, batch_size, last_pool_size, input_size, log_dir,
-                 data_root_path, train_list, data_path, annotation_path, class_path,
-                 model_name="model.ckpt", is_test=False):
+    def __init__(self, log_dir, data, model_name="model.ckpt", is_test=False):
+
+        # 读取数据
+        self.data_reader = data
+        self.batch_size = self.data_reader.batch_size
+        self.num_classes = self.data_reader.num_classes
+        self.input_size = self.data_reader.image_size
+        self.ratio = self.data_reader.ratio
+        self.num_segment = self.data_reader.num_segment
+        self.attention_class = self.data_reader.attention_class
 
         # 和保存模型相关的参数
         self.log_dir = Tools.new_dir(log_dir)
         self.model_name = model_name
         self.checkpoint_path = os.path.join(self.log_dir, self.model_name)
 
-        # 和数据相关的参数
-        self.input_size = input_size
-        self.batch_size = batch_size
-        self.num_classes = 21
-        self.has_255 = True  # 是否预测边界
-        self.num_segment = 4 if self.has_255 else 3
-
         # 和模型相关的参数：必须保证input_size大于8倍的last_pool_size
-        self.ratio = 8
-        self.last_pool_size = last_pool_size
+        self.last_pool_size = self.input_size[0] // self.ratio
         self.filter_number = 32
-
-        # 和模型训练相关的参数
         self.learning_rate = 5e-3
         self.num_steps = 500001
         self.print_step = 1 if is_test else 25
 
-        # 读取数据
-        self.data_reader = Data(data_root_path=data_root_path, data_list=train_list,
-                                data_path=data_path, annotation_path=annotation_path, class_path=class_path,
-                                batch_size=self.batch_size, image_size=self.input_size,
-                                is_test=is_test, has_255=self.has_255)
         # 网络
         (self.image_placeholder, self.label_segment_placeholder, self.label_classes_placeholder,
          self.raw_output_segment, self.raw_output_classes, self.pred_segment, self.pred_classes,
@@ -60,15 +52,15 @@ class Train(object):
         split = tf.split(self.image_placeholder, num_or_size_splits=4, axis=3)
         tf.summary.image("0-mask", split[3])
         tf.summary.image("1-image", tf.concat(split[0: 3], axis=3))
-        tf.summary.image("2-label", tf.cast(self.label_segment_placeholder * (85 if self.has_255 else 127), dtype=tf.uint8))
+        tf.summary.image("2-label", tf.cast(self.label_segment_placeholder * (255 // (self.num_segment - 1)),
+                                            dtype=tf.uint8))
+
         split = tf.split(self.raw_output_segment, num_or_size_splits=self.num_segment, axis=3)
-        tf.summary.image("3-attention", split[1])
-        tf.summary.image("4-other class", split[0])
-        tf.summary.image("5-background", split[-1])
-        if self.has_255:
-            tf.summary.image("5-border", split[2])
-            pass
-        tf.summary.image("6-pred_segment", tf.cast(self.pred_segment * (85 if self.has_255 else 127), dtype=tf.uint8))
+        tf.summary.image("3-attention", split[self.attention_class])
+        for num_segment in range(self.num_segment):
+            tf.summary.image("4-segment-output-{}".format(num_segment), split[num_segment])
+        tf.summary.image("5-pred_segment", tf.cast(self.pred_segment * (255 // (self.num_segment - 1)),
+                                                   dtype=tf.uint8))
 
         self.summary_op = tf.summary.merge_all()
 
@@ -90,8 +82,9 @@ class Train(object):
 
         # 网络
         net = PSPNet({'data': image_placeholder}, is_training=True, num_classes=self.num_classes,
-                     num_segment=self.num_segment, last_pool_size=self.last_pool_size, filter_number=self.filter_number)
-        raw_output_segment = net.layers['conv6_n_4']
+                     attention_class=self.attention_class, num_segment=self.num_segment,
+                     last_pool_size=self.last_pool_size, filter_number=self.filter_number)
+        raw_output_segment = net.layers['conv6_n_coco']
         raw_output_classes = net.layers['class_attention_fc']
 
         # Predictions
@@ -197,14 +190,38 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    Train(batch_size=3, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/third",
-          data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/trainval.txt",
-          data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-          is_test=False).train(save_pred_freq=2000, begin_step=34001)
+    is_win = True
+    is_voc = True
 
-    # Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/begin/third",
-    #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
-    #       data_path="JPEGImages\\", annotation_path="SegmentationObject\\", class_path="SegmentationClass\\",
-    #       train_list="ImageSets\\Segmentation\\train.txt",
-    #       is_test=True).train(save_pred_freq=2, begin_step=0)
+    if is_win:
+        if is_voc:
+            data_reader = Data(
+                data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
+                               data_list="ImageSets\\Segmentation\\train.txt",
+                               data_path="JPEGImages\\", annotation_path="SegmentationObject\\",
+                               class_path="SegmentationClass\\", batch_size=3, image_size=[720, 720], is_test=False)
+        else:
+            data_reader = COCOData(data_root_path="C:\\ALISURE\\DataModel\\Data\\COCO",
+                                   data_path="", annotation_path="annotations_trainval2014\\annotations",
+                                   data_type="val2014", batch_size=3, image_size=[720, 720])
+            pass
+
+        Train(log_dir="./model/begin/third", data=data_reader, is_test=True).train(save_pred_freq=2, begin_step=0)
+    else:
+        if is_voc:
+            data_reader = Data(data_root_path="/home/z840/ALISURE/Data/VOC2012/",
+                               data_list="ImageSets/Segmentation/trainval.txt",
+                               data_path="JPEGImages/", annotation_path="SegmentationObject/",
+                               class_path="SegmentationClass/", batch_size=3, image_size=[720, 720], is_test=False)
+        else:
+            data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/VOC2012/",
+                                   data_path="JPEGImages/", annotation_path="SegmentationObject/",
+                                   data_type="SegmentationClass/", batch_size=3, image_size=[720, 720])
+            pass
+
+        Train(log_dir="./model/begin/third", data=data_reader, is_test=False).train(save_pred_freq=2000,
+                                                                                    begin_step=34001)
+        pass
+
+    pass
 

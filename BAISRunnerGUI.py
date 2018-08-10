@@ -1,9 +1,9 @@
 import os
-from PIL import Image
-from skimage import io as sio
 import numpy as np
-from matplotlib import pyplot as plt
+from PIL import Image
 import tensorflow as tf
+from skimage import io as sio
+from matplotlib import pyplot as plt
 
 from BAISTools import Tools
 from BAISData import Data, CategoryNames
