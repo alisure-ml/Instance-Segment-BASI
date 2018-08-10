@@ -287,7 +287,7 @@ class COCOData(object):
 
     def __init__(self, data_root_path="C:\\ALISURE\\DataModel\\Data\\COCO",
                  annotation_path="annotations_trainval2014\\annotations", data_type="val2014",
-                 batch_size=4, image_size=(720, 720), ratio=8):
+                 batch_size=4, image_size=(720, 720), ratio=8, min_area=400):
 
         self.batch_size = batch_size
         self.image_size = image_size
@@ -308,12 +308,19 @@ class COCOData(object):
                           "ann_ids": self.coco.getAnnIds(imgIds=self.coco.anns[ann_key]["image_id"]),
                           "file_name": os.path.join(
                               self.img_path,self.coco.loadImgs(ids=self.coco.anns[ann_key]["image_id"])[0]["file_name"])}
-                         for ann_key in self.coco.anns.keys()]
+                         for ann_key in self.coco.anns.keys()
+                         if self.coco.loadAnns(self.coco.anns[ann_key]["id"])[0]["area"] >= min_area]
 
         # 用来生成训练数据
         self.number_patch = len(self.ann_list) // self.batch_size
         self._random_index = list(range(0, len(self.ann_list)))
         self._now = 0
+
+        print("---------------------------------------")
+        print(self.number_patch)
+        print(len(self.ann_list))
+        print("---------------------------------------")
+
         pass
 
     @staticmethod
@@ -346,6 +353,7 @@ class COCOData(object):
             _batch_ann_attention.append(anns_attention)
             batch_ann_data.append(np.zeros(anns_attention.shape, dtype=np.uint8))
             where = np.argwhere(anns_attention == 1)
+
             where = where[np.random.randint(0, len(where))]
             batch_ann_where.append(where)
             pass
@@ -363,7 +371,7 @@ class COCOData(object):
         # 数据 and resize
         batch_data = []
         for ann_index, ann in enumerate(batch_ann):
-            batch_data.append(np.asarray(Image.open(ann["file_name"]).resize(self.image_size)) / 255)
+            batch_data.append(np.asarray(Image.open(ann["file_name"]).convert("RGB").resize(self.image_size)) / 255)
             # batch_data.append(np.zeros(shape=(self.image_size[0], self.image_size[1], 3)))
 
             batch_ann_data[ann_index] = np.asarray(
@@ -380,8 +388,10 @@ class COCOData(object):
             pass
 
         # 数据+MASK
-        final_batch_data = [np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2)
-                            for one_data, one_mask in zip(batch_data, batch_ann_mask)]
+        final_batch_data = []
+        for one_data, one_mask in zip(batch_data, batch_ann_mask):
+            final_batch_data.append(np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2))
+            pass
 
         # 标注
         final_batch_ann = [np.expand_dims(one_ann, 2) for one_ann in batch_ann_data]
@@ -393,7 +403,7 @@ class COCOData(object):
         return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_ann_mask
 
     @staticmethod
-    def _mask_gaussian(image_size, where, sigma=30):
+    def _mask_gaussian(image_size, where, sigma=10):
 
         x = np.arange(0, image_size[1], 1, float)
         y = np.arange(0, image_size[0], 1, float)
@@ -418,7 +428,7 @@ if __name__ == '__main__':
 
     data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/COCO",
                            annotation_path="annotations_trainval2014/annotations",
-                           data_type="val2014", batch_size=3, image_size=[720, 720])
+                           data_type="train2014", batch_size=2, image_size=[720, 720])
     for i in range(200):
         data_reader.next_batch_train()
         pass
