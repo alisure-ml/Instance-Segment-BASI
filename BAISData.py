@@ -371,7 +371,7 @@ class COCOData(object):
         # 数据 and resize
         batch_data = []
         for ann_index, ann in enumerate(batch_ann):
-            batch_data.append(np.asarray(Image.open(ann["file_name"]).resize(self.image_size)) / 255)
+            batch_data.append(np.asarray(Image.open(ann["file_name"]).convert("RGB").resize(self.image_size)) / 255)
             # batch_data.append(np.zeros(shape=(self.image_size[0], self.image_size[1], 3)))
 
             batch_ann_data[ann_index] = np.asarray(
@@ -388,8 +388,10 @@ class COCOData(object):
             pass
 
         # 数据+MASK
-        final_batch_data = [np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2)
-                            for one_data, one_mask in zip(batch_data, batch_ann_mask)]
+        final_batch_data = []
+        for one_data, one_mask in zip(batch_data, batch_ann_mask):
+            final_batch_data.append(np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2))
+            pass
 
         # 标注
         final_batch_ann = [np.expand_dims(one_ann, 2) for one_ann in batch_ann_data]
