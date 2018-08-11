@@ -111,17 +111,18 @@ class Train(object):
                 tf.summary.image("2-label", tf.cast(self.label_segment_placeholder * 85, dtype=tf.uint8))
                 tf.summary.image("3-pred segment", tf.cast(self.pred_segment * 85, dtype=tf.uint8))
 
-                for segment_index, segment in enumerate(self.segments):
-                    split = tf.split(segment, num_or_size_splits=self.num_segment, axis=3)
-                    tf.summary.image("4-{}-other".format(segment_index), split[0])
-                    tf.summary.image("4-{}-attention".format(segment_index), split[1])
-                    tf.summary.image("4-{}-border".format(segment_index), split[2])
-                    tf.summary.image("4-{}-background".format(segment_index), split[-1])
-
                 # attention
                 for attention_index, attention in enumerate(self.attentions):
-                    tf.summary.image("5-{}-attention".format(attention_index), attention)
+                    tf.summary.image("4-{}-attention".format(attention_index), attention)
                     pass
+
+                for segment_index, segment in enumerate(self.segments):
+                    split = tf.split(segment, num_or_size_splits=self.num_segment, axis=3)
+                    tf.summary.image("5-{}-other".format(segment_index), split[0])
+                    tf.summary.image("5-{}-attention".format(segment_index), split[1])
+                    tf.summary.image("5-{}-border".format(segment_index), split[2])
+                    tf.summary.image("5-{}-background".format(segment_index), split[-1])
+
                 pass
 
             self.summary_op = tf.summary.merge_all()
