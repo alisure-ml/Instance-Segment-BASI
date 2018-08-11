@@ -618,6 +618,25 @@ class BAISNet(object):
             segments.append(segment_output)
             pass
 
+        with tf.variable_scope(name_or_scope="attention_3"):
+            # attention（一个通道）
+            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
+            attentions.append(attention)
+
+            # 使用attention
+            multiply = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
+            net_input_feature = multiply * 1
+
+            # 分类
+            class_fc = self._classifies(multiply, self.last_pool_size, self.filter_number, self.num_classes)
+            classes.append(class_fc)
+
+            # 解码模块，输入特征图，输出分类结果和分割结果
+            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
+                net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
+            segments.append(segment_output)
+            pass
+
         attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
         attentions.append(attention)
 

@@ -99,7 +99,7 @@ class Train(object):
                 for loss_segment_index, loss_segment in enumerate(self.loss_segments):
                     tf.summary.scalar("loss_segment_{}".format(loss_segment_index), loss_segment)
                 for loss_class_index, loss_class in enumerate(self.loss_classes):
-                    tf.summary.scalar("loss_segment_{}".format(loss_class_index), loss_class)
+                    tf.summary.scalar("loss_class_{}".format(loss_class_index), loss_class)
                 tf.summary.scalar("accuracy_segment", self.accuracy_segment)
                 tf.summary.scalar("accuracy_classes", self.accuracy_classes)
                 pass
@@ -227,7 +227,7 @@ if __name__ == '__main__':
     Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/attention/first",
           data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/trainval.txt",
           data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-          is_test=True).train(save_pred_freq=2000, begin_step=1)
+          is_test=False).train(save_pred_freq=2000, begin_step=1)
 
     # Train(batch_size=2, last_pool_size=30, input_size=[240, 240], log_dir="./model/begin/third",
     #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
