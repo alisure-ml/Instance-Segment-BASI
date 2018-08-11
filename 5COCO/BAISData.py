@@ -403,7 +403,7 @@ class COCOData(object):
         return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_ann_mask
 
     @staticmethod
-    def _mask_gaussian(image_size, where, sigma=10):
+    def _mask_gaussian(image_size, where, sigma=20):
 
         x = np.arange(0, image_size[1], 1, float)
         y = np.arange(0, image_size[0], 1, float)

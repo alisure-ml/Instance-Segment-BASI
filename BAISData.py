@@ -1,8 +1,7 @@
 import os
 import time
-from skimage import io as sio
-from pycocotools.coco import COCO
 import numpy as np
+import xml.etree.ElementTree as et
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -20,14 +19,11 @@ class Data(object):
     def __init__(self, data_list="ImageSets\\Segmentation\\train.txt", data_path="JPEGImages\\",
                  data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",
                  annotation_path="SegmentationObject\\", class_path="SegmentationClass\\",
-                 batch_size=4, image_size=(720, 720), ratio=8, is_test=False, has_border=True):
+                 batch_size=4, image_size=(720, 720), ratio=8, is_test=False, has_255=False):
 
         self.batch_size = batch_size
         self.image_size = image_size
         self.ratio = ratio
-        self.num_segment = 4 if has_border else 3
-        self.attention_class = 1
-        self.num_classes = 21
 
         # 读取数据
         self._data_list, self._annotation_list, self._class_list = self._read_list(
@@ -41,7 +37,7 @@ class Data(object):
 
         # 拆解标签
         self._annotations = self._read_annotation(self._annotation_list, self._class_list,
-                                                  self.image_size, self.ratio, has_border)
+                                                  self.image_size, self.ratio, has_255)
         # 读取数据
         self._images_data = self._read_image(self._data_list, self.image_size)
 
@@ -50,10 +46,6 @@ class Data(object):
         self._random_index = list(range(0, len(self._annotations)))
         self._now = 0
         pass
-
-    @staticmethod
-    def get_category_name(cat_id):
-        return CategoryNames[cat_id]
 
     def next_batch_train(self):
         # 打乱标签
@@ -138,7 +130,7 @@ class Data(object):
         return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask
 
     @staticmethod
-    def _read_annotation(annotation_list, class_list, image_size, ratio, has_border=False):
+    def _read_annotation(annotation_list, class_list, image_size, ratio, has_255=False):
 
         all_ann_data = []
 
@@ -149,7 +141,7 @@ class Data(object):
             ann_data = np.asarray(Image.open(ann_name).resize((image_size[0]//ratio, image_size[1]//ratio)))
 
             # 边界当背景
-            if has_border:
+            if has_255:
                 ann_data = np.where(ann_data == 255, 171, ann_data)  # 2
             else:
                 ann_data = np.where(ann_data == 255, 0, ann_data)
@@ -163,7 +155,7 @@ class Data(object):
             ann_class = []
             for num in nums:
                 # 掩码信息
-                if has_border:
+                if has_255:
                     ann_mask_one = np.where(ann_data == num, 85, ann_data)  # 1
                     ann_mask_one = (ann_mask_one - 1) // 84
                 else:
@@ -283,153 +275,12 @@ class Data(object):
     pass
 
 
-class COCOData(object):
-
-    def __init__(self, data_root_path="C:\\ALISURE\\DataModel\\Data\\COCO",
-                 annotation_path="annotations_trainval2014\\annotations", data_type="val2014",
-                 batch_size=4, image_size=(720, 720), ratio=8, min_area=400):
-
-        self.batch_size = batch_size
-        self.image_size = image_size
-        self.ratio = ratio
-        self.num_segment = 3
-        self.attention_class = 2
-        self.num_classes = 91
-
-        # 读取数据
-        self.img_path = os.path.join(data_root_path, data_type)
-        self.ann_file = os.path.join(data_root_path, annotation_path, "instances_{}.json".format(data_type))
-
-        self.coco = COCO(self.ann_file)
-
-        self.ann_list = [{"image_id": self.coco.anns[ann_key]["image_id"],
-                          "category_id": self.coco.anns[ann_key]["category_id"],
-                          "id": self.coco.anns[ann_key]["id"],
-                          "ann_ids": self.coco.getAnnIds(imgIds=self.coco.anns[ann_key]["image_id"]),
-                          "file_name": os.path.join(
-                              self.img_path,self.coco.loadImgs(ids=self.coco.anns[ann_key]["image_id"])[0]["file_name"])}
-                         for ann_key in self.coco.anns.keys()
-                         if self.coco.loadAnns(self.coco.anns[ann_key]["id"])[0]["area"] >= min_area]
-
-        # 用来生成训练数据
-        self.number_patch = len(self.ann_list) // self.batch_size
-        self._random_index = list(range(0, len(self.ann_list)))
-        self._now = 0
-
-        print("---------------------------------------")
-        print(self.number_patch)
-        print(len(self.ann_list))
-        print("---------------------------------------")
-
-        pass
-
-    @staticmethod
-    def get_category_name(coco, cat_id):
-        return coco.cats[cat_id]["name"]
-
-    def next_batch_train(self):
-        # 打乱标签
-        if self._now >= self.number_patch:
-            print(".......................................................................")
-            np.random.shuffle(self._random_index)
-            self._now = 0
-            pass
-
-        # 选取当前批次的索引
-        now_indexes = self._random_index[self._now * self.batch_size: (self._now + 1) * self.batch_size]
-
-        # 标注
-        batch_ann = [self.ann_list[now_index] for now_index in now_indexes]
-
-        batch_ann_data = []
-        batch_ann_where = []
-        batch_ann_mask = []
-
-        # 选取初始点的位置
-        _batch_ann_attention = []
-        for ann_index, ann in enumerate(batch_ann):
-            # attention
-            anns_attention = self.coco.annToMask(self.coco.loadAnns(ann["id"])[0])
-            _batch_ann_attention.append(anns_attention)
-            batch_ann_data.append(np.zeros(anns_attention.shape, dtype=np.uint8))
-            where = np.argwhere(anns_attention == 1)
-
-            where = where[np.random.randint(0, len(where))]
-            batch_ann_where.append(where)
-            pass
-
-        # ann 类别
-        for ann_index, ann in enumerate(batch_ann):
-            for ann_id in ann["ann_ids"]:
-                load_anns = self.coco.loadAnns(ann_id)
-                batch_ann_data[ann_index] += self.coco.annToMask(load_anns[0])
-            # bg is 0, other is 1, attention is 2
-            batch_ann_data[ann_index] = np.where(batch_ann_data[ann_index] > 0, 1, 0)
-            batch_ann_data[ann_index] = np.where(_batch_ann_attention[ann_index] > 0, 2, batch_ann_data[ann_index])
-            pass
-
-        # 数据 and resize
-        batch_data = []
-        for ann_index, ann in enumerate(batch_ann):
-            batch_data.append(np.asarray(Image.open(ann["file_name"]).convert("RGB").resize(self.image_size)) / 255)
-            # batch_data.append(np.zeros(shape=(self.image_size[0], self.image_size[1], 3)))
-
-            batch_ann_data[ann_index] = np.asarray(
-                Image.fromarray(np.asarray(batch_ann_data[ann_index], dtype=np.uint8)).resize(
-                    (self.image_size[0] // self.ratio, self.image_size[1] // self.ratio)))
-
-            batch_ann_where[ann_index][0] = self.image_size[0] / len(_batch_ann_attention[ann_index]) * batch_ann_where[ann_index][0]
-            batch_ann_where[ann_index][1] = self.image_size[1] / len(_batch_ann_attention[ann_index][0]) * batch_ann_where[ann_index][1]
-            pass
-
-        # 根据初始点生成高斯Mask
-        for ann_index, _ in enumerate(batch_ann):
-            batch_ann_mask.append(self._mask_gaussian(self.image_size, batch_ann_where[ann_index]))
-            pass
-
-        # 数据+MASK
-        final_batch_data = []
-        for one_data, one_mask in zip(batch_data, batch_ann_mask):
-            final_batch_data.append(np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2))
-            pass
-
-        # 标注
-        final_batch_ann = [np.expand_dims(one_ann, 2) for one_ann in batch_ann_data]
-
-        # 类别
-        final_batch_class = [one_ann["category_id"] for one_ann in batch_ann]
-
-        self._now += 1
-        return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_ann_mask
-
-    @staticmethod
-    def _mask_gaussian(image_size, where, sigma=10):
-
-        x = np.arange(0, image_size[1], 1, float)
-        y = np.arange(0, image_size[0], 1, float)
-        y = y[:, np.newaxis]
-
-        x0 = where[1]
-        y0 = where[0]
-
-        # 生成高斯掩码
-        mask = np.exp(-4 * np.log(2) * ((x - x0) ** 2 + (y - y0) ** 2) / sigma ** 2).astype(np.float32)
-        return mask
-
-    pass
-
-
 if __name__ == '__main__':
-    # _data = Data(is_test=True)
-    # for i in range(20):
-    #     _data.next_batch_train()
-    #     _data.next_batch_test(i)
-    #     pass
-
-    data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/COCO",
-                           annotation_path="annotations_trainval2014/annotations",
-                           data_type="train2014", batch_size=2, image_size=[720, 720])
-    for i in range(200):
-        data_reader.next_batch_train()
+    # _data = Data(data_root_path="/home/z840/ALISURE/Data/VOC2012/",
+    #              data_path="JPEGImages/", annotation_path="SegmentationObject/",
+    #              data_list="ImageSets/Segmentation/train.txt")
+    _data = Data(is_test=True)
+    for i in range(20):
+        final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask = _data.next_batch_train()
+        _data.next_batch_test(i)
         pass
-

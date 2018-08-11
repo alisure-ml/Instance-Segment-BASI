@@ -109,7 +109,7 @@ class Train(object):
         loss_classes = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=label_classes_placeholder,
                                                                                      logits=raw_output_classes))
         # 总损失
-        loss = tf.add_n([loss_segment, 0.1 * loss_classes])
+        loss = tf.add_n([loss_segment, 0.2 * loss_classes])
 
         # 学习率策略
         step_ph = tf.placeholder(dtype=tf.float32, shape=())
