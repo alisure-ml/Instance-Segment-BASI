@@ -213,11 +213,11 @@ if __name__ == '__main__':
                                data_list="ImageSets/Segmentation/trainval.txt",
                                data_path="JPEGImages/", annotation_path="SegmentationObject/",
                                class_path="SegmentationClass/", batch_size=3, image_size=[720, 720],
-                               is_test=False, has_border=True)
+                               is_test=False)
         else:
             data_reader = COCOData(data_root_path="/home/z840/ALISURE/Data/COCO",
                                    annotation_path="annotations_trainval2014/annotations",
-                                   data_type="train2014", batch_size=8, image_size=[400, 400])
+                                   data_type="train2014", batch_size=8, image_size=[400, 400], min_area=2000)
             pass
 
         Train(log_dir="./model/coco/first", data=data_reader, is_test=False).train(save_pred_freq=2000, begin_step=1)
