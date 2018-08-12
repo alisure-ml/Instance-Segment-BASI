@@ -118,7 +118,7 @@ class Net(object):
 class BAISNet(object):
 
     def __init__(self, input_data, is_training, num_classes, num_segment,
-                 segment_attention, last_pool_size, filter_number):
+                 segment_attention, last_pool_size, filter_number, attention_module_num):
         self.input_data = input_data
         self.is_training = is_training
         self.num_classes = num_classes
@@ -126,6 +126,7 @@ class BAISNet(object):
         self.segment_attention = segment_attention
         self.last_pool_size = last_pool_size
         self.filter_number = filter_number
+        self.attention_module_num = attention_module_num
         pass
 
     @staticmethod
@@ -614,13 +615,13 @@ class BAISNet(object):
 
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
+                net_input_feature, self.filter_number, self.last_pool_size, 2)
             segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
         with tf.variable_scope(name_or_scope="attention_3"):
             # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
+            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[1]
             attentions.append(attention)
 
             # 使用attention
@@ -633,11 +634,11 @@ class BAISNet(object):
 
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
+                net_input_feature, self.filter_number, self.last_pool_size, 2)
             segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
-        attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
+        attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[1]
         attentions.append(attention)
 
         # 使用attention

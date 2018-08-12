@@ -26,8 +26,9 @@ class Train(object):
         self.input_size = input_size
         self.batch_size = batch_size
         self.num_classes = 21
-        self.num_segment = 4
-        self.segment_attention = 1
+        self.num_segment = 4  # 解码通道数：其他对象、attention、边界、背景
+        self.segment_attention = 1  # 当解码的通道数是4时，attention所在的位置
+        self.attention_module_num = 2  # attention模块中，解码通道数是2（背景、attention）的模块个数
 
         # 和模型相关的参数：必须保证input_size大于8倍的last_pool_size
         self.ratio = 8
@@ -50,12 +51,15 @@ class Train(object):
                                                 shape=(None, self.input_size[0], self.input_size[1], 4))
         self.label_segment_placeholder = tf.placeholder(
             dtype=tf.int32, shape=(None, self.input_size[0] // self.ratio, self.input_size[1] // self.ratio, 1))
+        self.label_attention_placeholder = tf.placeholder(
+            dtype=tf.int32, shape=(None, self.input_size[0] // self.ratio, self.input_size[1] // self.ratio, 1))
         self.label_classes_placeholder = tf.placeholder(dtype=tf.int32, shape=(None,))
 
         # 网络
         self.net = BAISNet(self.image_placeholder, is_training=True, num_classes=self.num_classes,
                            num_segment=self.num_segment, segment_attention=self.segment_attention,
-                           last_pool_size=self.last_pool_size, filter_number=self.filter_number)
+                           last_pool_size=self.last_pool_size, filter_number=self.filter_number,
+                           attention_module_num=self.attention_module_num)
 
         self.segments, self.attentions, self.classes = self.net.build()
         self.final_segment_logit = self.segments[0]
@@ -68,8 +72,11 @@ class Train(object):
         # loss
         self.label_batch = tf.image.resize_nearest_neighbor(self.label_segment_placeholder,
                                                             tf.stack(self.final_segment_logit.get_shape()[1:3]))
+        self.label_attention_batch = tf.image.resize_nearest_neighbor(
+            self.label_attention_placeholder, tf.stack(self.final_segment_logit.get_shape()[1:3]))
         self.loss, self.loss_segment_all, self.loss_class_all, self.loss_segments, self.loss_classes = self.cal_loss(
-            self.segments, self.classes, self.label_batch, self.label_classes_placeholder, self.num_segment)
+            self.segments, self.classes, self.label_batch, self.label_attention_batch,
+            self.label_classes_placeholder, self.num_segment, attention_module_num=self.attention_module_num)
 
         # 当前批次的准确率：accuracy
         self.accuracy_segment = tcm.accuracy(self.pred_segment, self.label_segment_placeholder)
@@ -109,6 +116,7 @@ class Train(object):
                 tf.summary.image("0-mask", split[3])
                 tf.summary.image("1-image", tf.concat(split[0: 3], axis=3))
                 tf.summary.image("2-label", tf.cast(self.label_segment_placeholder * 85, dtype=tf.uint8))
+                tf.summary.image("2-attention", tf.cast(self.label_attention_placeholder * 255, dtype=tf.uint8))
                 tf.summary.image("3-pred segment", tf.cast(self.pred_segment * 85, dtype=tf.uint8))
 
                 # attention
@@ -117,11 +125,17 @@ class Train(object):
                     pass
 
                 for segment_index, segment in enumerate(self.segments):
-                    split = tf.split(segment, num_or_size_splits=self.num_segment, axis=3)
-                    tf.summary.image("5-{}-other".format(segment_index), split[0])
-                    tf.summary.image("5-{}-attention".format(segment_index), split[1])
-                    tf.summary.image("5-{}-border".format(segment_index), split[2])
-                    tf.summary.image("5-{}-background".format(segment_index), split[-1])
+                    if segment_index < self.attention_module_num:
+                        split = tf.split(segment, num_or_size_splits=self.num_segment, axis=3)
+                        tf.summary.image("5-{}-other".format(segment_index), split[0])
+                        tf.summary.image("5-{}-attention".format(segment_index), split[1])
+                        tf.summary.image("5-{}-border".format(segment_index), split[2])
+                        tf.summary.image("5-{}-background".format(segment_index), split[-1])
+                    else:
+                        split = tf.split(segment, num_or_size_splits=2, axis=3)
+                        tf.summary.image("5-{}-background".format(segment_index), split[0])
+                        tf.summary.image("5-{}-attention".format(segment_index), split[1])
+                        pass
 
                 pass
 
@@ -138,14 +152,22 @@ class Train(object):
         pass
 
     @staticmethod
-    def cal_loss(segments, classes, label_segments, label_classes, num_segment):
+    def cal_loss(segments, classes, label_segment, label_attention, label_classes, num_segment, attention_module_num):
 
-        label_segments = tf.reshape(label_segments, [-1, ])
+        label_segment = tf.reshape(label_segment, [-1, ])
 
         loss_segments = []
-        for segment in segments:
-            loss_segments.append(tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=label_segments, logits=tf.reshape(segment, [-1, num_segment]))))
+        loss_segments_attention = []
+        for segment_index, segment in enumerate(segments):
+            if segment_index < len(segments) - attention_module_num:
+                now_loss_segment = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=label_attention, logits=tf.reshape(segment, [-1, num_segment])))
+                loss_segments.append(now_loss_segment)
+                loss_segments_attention.append(now_loss_segment)
+            else:
+                now_loss_segment = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=label_segment, logits=tf.reshape(segment, [-1, num_segment])))
+                loss_segments.append(now_loss_segment)
             pass
 
         loss_classes = []
@@ -154,7 +176,7 @@ class Train(object):
                 labels=label_classes, logits=class_one)))
             pass
 
-        loss_segment_all = tf.add_n(loss_segments) / len(loss_segments)
+        loss_segment_all = (tf.add_n(loss_segments) + tf.add_n(loss_segments_attention)) / len(loss_segments)
         loss_class_all = tf.add_n(loss_classes) / len(loss_classes)
         # 总损失
         loss = loss_segment_all + 0.1 * loss_class_all
@@ -167,7 +189,7 @@ class Train(object):
         for step in range(begin_step, self.num_steps):
             start_time = time.time()
 
-            final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask = \
+            final_batch_data, final_batch_ann, final_batch_ann_attention, final_batch_class, batch_data, batch_mask = \
                 self.data_reader.next_batch_train()
 
             # train_op = self.train_attention_op
@@ -187,6 +209,7 @@ class Train(object):
                      self.summary_op],
                     feed_dict={self.step_ph: step, self.image_placeholder: final_batch_data,
                                self.label_segment_placeholder: final_batch_ann,
+                               self.label_attention_placeholder: final_batch_ann_attention,
                                self.label_classes_placeholder: final_batch_class})
                 self.summary_writer.add_summary(summary_now, global_step=step)
             else:
@@ -200,6 +223,7 @@ class Train(object):
                      self.final_segment_logit, self.pred_segment, self.final_class_logit, self.pred_classes],
                     feed_dict={self.step_ph: step, self.image_placeholder: final_batch_data,
                                self.label_segment_placeholder: final_batch_ann,
+                               self.label_attention_placeholder: final_batch_ann_attention,
                                self.label_classes_placeholder: final_batch_class})
                 pass
 

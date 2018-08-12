@@ -61,6 +61,13 @@ class Data(object):
         # 标注
         batch_ann = [self._annotations[now_index] for now_index in now_indexes]
 
+        # 关注的标签
+        batch_ann_attention = []
+        for ann_index, ann in enumerate(batch_ann):
+            ann_attention = np.asarray(ann[-1] == 1, dtype=np.int32)
+            batch_ann_attention.append(ann_attention)
+            pass
+
         # 选取初始点的位置
         for ann_index, ann in enumerate(batch_ann):
             where = np.argwhere(ann[-1] == 1)
@@ -83,51 +90,13 @@ class Data(object):
 
         # 标注
         final_batch_ann = [np.expand_dims(one_ann[-1], 2) for one_ann in batch_ann]
+        final_batch_ann_attention = [np.expand_dims(one_ann[-1], 2) for one_ann in batch_ann_attention]
 
         # 类别
         final_batch_class = [one_ann[2] for one_ann in batch_ann]
-
-        # save annotation
-        # for one_index, one_ann in enumerate(batch_ann):
-        #     Image.fromarray(np.asarray(one_ann[-1] * 255, dtype=np.uint8)).convert("L").save("{}.bmp".format(one_index))
-        #     pass
 
         self._now += 1
-        return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask
-
-    def next_batch_test(self, batch_index):
-        if batch_index >= self.number_patch:
-            print("there is error, because that test is over .....")
-
-        # 标注
-        batch_ann = self._annotations[batch_index * self.batch_size: (batch_index + 1) * self.batch_size]
-
-        # 选取初始点的位置
-        for ann_index, ann in enumerate(batch_ann):
-            where = np.argwhere(ann[-1] == 1)
-            batch_ann[ann_index][1] = where[np.random.randint(0, len(where))]
-            pass
-
-        # 根据初始点生成高斯Mask
-        batch_mask = []
-        for ann_index, ann in enumerate(batch_ann):
-            batch_mask.append(self._mask_gaussian(self.image_size, ann[1]))
-            pass
-
-        # 数据
-        batch_data = [self._images_data[ann[0]] for ann in batch_ann]
-
-        # 数据+MASK
-        final_batch_data = [np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2)
-                            for one_data, one_mask in zip(batch_data, batch_mask)]
-
-        # 标注
-        final_batch_ann = [np.expand_dims(one_ann[-1], 2) for one_ann in batch_ann]
-
-        # 类别
-        final_batch_class = [one_ann[2] for one_ann in batch_ann]
-
-        return final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask
+        return final_batch_data, final_batch_ann, final_batch_ann_attention, final_batch_class, batch_data, batch_mask
 
     @staticmethod
     def _read_annotation(annotation_list, class_list, image_size, ratio, has_255=False):
@@ -241,7 +210,6 @@ class Data(object):
             nums = [i for i in range(1, 255) if np.any(ann_data == i)]
             # 所有标签的掩码
             ann_mask = [np.where(ann_data == i, 1, 0) for i in nums]
-            pass
 
             # 选取初始点的位置
             where = np.argwhere(ann_mask[ann_index] == 1)
@@ -281,6 +249,6 @@ if __name__ == '__main__':
     #              data_list="ImageSets/Segmentation/train.txt")
     _data = Data(is_test=True)
     for i in range(20):
-        final_batch_data, final_batch_ann, final_batch_class, batch_data, batch_mask = _data.next_batch_train()
-        _data.next_batch_test(i)
+        (final_batch_data, final_batch_ann, final_batch_ann_attention,
+         final_batch_class, batch_data, batch_mask) = _data.next_batch_train()
         pass
