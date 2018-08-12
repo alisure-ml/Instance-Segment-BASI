@@ -578,7 +578,7 @@ class BAISNet(object):
         # 解码模块，输入特征图，输出分类结果和分割结果
         segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
             net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
-        segments.append(segment_output)
+        segments.append(net_input_conv6_n_4_sigmoid)
 
         with tf.variable_scope(name_or_scope="attention_1"):
             # attention（一个通道）
@@ -596,7 +596,7 @@ class BAISNet(object):
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
                 net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
-            segments.append(segment_output)
+            segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
         with tf.variable_scope(name_or_scope="attention_2"):
@@ -615,7 +615,7 @@ class BAISNet(object):
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
                 net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
-            segments.append(segment_output)
+            segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
         with tf.variable_scope(name_or_scope="attention_3"):
@@ -634,7 +634,7 @@ class BAISNet(object):
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
                 net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
-            segments.append(segment_output)
+            segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
         attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
