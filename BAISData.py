@@ -90,7 +90,7 @@ class Data(object):
 
         # 标注
         final_batch_ann = [np.expand_dims(one_ann[-1], 2) for one_ann in batch_ann]
-        final_batch_ann_attention = [np.expand_dims(one_ann[-1], 2) for one_ann in batch_ann_attention]
+        final_batch_ann_attention = [np.expand_dims(one_ann, 2) for one_ann in batch_ann_attention]
 
         # 类别
         final_batch_class = [one_ann[2] for one_ann in batch_ann]

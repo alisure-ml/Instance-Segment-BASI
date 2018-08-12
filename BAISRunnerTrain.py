@@ -89,58 +89,66 @@ class Train(object):
                                                tf.pow((1 - self.step_ph / self.num_steps), 0.9))
             self.train_op = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
 
-            # 单独训练最后的分类
-            classes_trainable = [v for v in tf.trainable_variables()
-                                 if 'attention_1' in v.name or "class_attention" in v.name]
-            print(len(classes_trainable))
+            # 单独训练最后的attention
+            attention_trainable = [v for v in tf.trainable_variables()
+                                 if 'attention' in v.name or "class_attention" in v.name]
+            print(len(attention_trainable))
             self.train_attention_op = tf.train.GradientDescentOptimizer(
-                self.learning_rate).minimize(self.loss, var_list=classes_trainable)
+                self.learning_rate).minimize(self.loss, var_list=attention_trainable)
             pass
 
-        with tf.name_scope("summary"):
-            # summary 1
-            with tf.name_scope("scalar"):
-                tf.summary.scalar("loss", self.loss)
-                tf.summary.scalar("loss_segment", self.loss_segment_all)
-                tf.summary.scalar("loss_class", self.loss_class_all)
-                for loss_segment_index, loss_segment in enumerate(self.loss_segments):
-                    tf.summary.scalar("loss_segment_{}".format(loss_segment_index), loss_segment)
-                for loss_class_index, loss_class in enumerate(self.loss_classes):
-                    tf.summary.scalar("loss_class_{}".format(loss_class_index), loss_class)
-                tf.summary.scalar("accuracy_segment", self.accuracy_segment)
-                tf.summary.scalar("accuracy_classes", self.accuracy_classes)
+        # summary 1
+        with tf.name_scope("loss"):
+            tf.summary.scalar("loss", self.loss)
+            tf.summary.scalar("loss_segment", self.loss_segment_all)
+            tf.summary.scalar("loss_class", self.loss_class_all)
+            for loss_segment_index, loss_segment in enumerate(self.loss_segments):
+                tf.summary.scalar("loss_segment_{}".format(loss_segment_index), loss_segment)
+            for loss_class_index, loss_class in enumerate(self.loss_classes):
+                tf.summary.scalar("loss_class_{}".format(loss_class_index), loss_class)
+            pass
+
+        with tf.name_scope("accuracy"):
+            tf.summary.scalar("accuracy_segment", self.accuracy_segment)
+            tf.summary.scalar("accuracy_classes", self.accuracy_classes)
+            pass
+
+        with tf.name_scope("label"):
+            split = tf.split(self.image_placeholder, num_or_size_splits=4, axis=3)
+            tf.summary.image("0-mask", split[3])
+            tf.summary.image("1-image", tf.concat(split[0: 3], axis=3))
+            tf.summary.image("2-label", tf.cast(self.label_segment_placeholder * 85, dtype=tf.uint8))
+            tf.summary.image("3-attention", tf.cast(self.label_attention_placeholder * 255, dtype=tf.uint8))
+            pass
+
+        with tf.name_scope("predict"):
+            tf.summary.image("predict", tf.cast(self.pred_segment * 85, dtype=tf.uint8))
+            pass
+
+        with tf.name_scope("attention"):
+            # attention
+            for attention_index, attention in enumerate(self.attentions):
+                tf.summary.image("{}-attention".format(attention_index), attention)
                 pass
+            pass
 
-            with tf.name_scope("image"):
-                split = tf.split(self.image_placeholder, num_or_size_splits=4, axis=3)
-                tf.summary.image("0-mask", split[3])
-                tf.summary.image("1-image", tf.concat(split[0: 3], axis=3))
-                tf.summary.image("2-label", tf.cast(self.label_segment_placeholder * 85, dtype=tf.uint8))
-                tf.summary.image("2-attention", tf.cast(self.label_attention_placeholder * 255, dtype=tf.uint8))
-                tf.summary.image("3-pred segment", tf.cast(self.pred_segment * 85, dtype=tf.uint8))
-
-                # attention
-                for attention_index, attention in enumerate(self.attentions):
-                    tf.summary.image("4-{}-attention".format(attention_index), attention)
+        with tf.name_scope("sigmoid"):
+            for segment_index, segment in enumerate(self.segments):
+                if segment_index < self.attention_module_num:
+                    split = tf.split(segment, num_or_size_splits=self.num_segment, axis=3)
+                    tf.summary.image("{}-other".format(segment_index), split[0])
+                    tf.summary.image("{}-attention".format(segment_index), split[1])
+                    tf.summary.image("{}-border".format(segment_index), split[2])
+                    tf.summary.image("{}-background".format(segment_index), split[-1])
+                else:
+                    split = tf.split(segment, num_or_size_splits=2, axis=3)
+                    tf.summary.image("{}-background".format(segment_index), split[0])
+                    tf.summary.image("{}-attention".format(segment_index), split[1])
                     pass
-
-                for segment_index, segment in enumerate(self.segments):
-                    if segment_index < self.attention_module_num:
-                        split = tf.split(segment, num_or_size_splits=self.num_segment, axis=3)
-                        tf.summary.image("5-{}-other".format(segment_index), split[0])
-                        tf.summary.image("5-{}-attention".format(segment_index), split[1])
-                        tf.summary.image("5-{}-border".format(segment_index), split[2])
-                        tf.summary.image("5-{}-background".format(segment_index), split[-1])
-                    else:
-                        split = tf.split(segment, num_or_size_splits=2, axis=3)
-                        tf.summary.image("5-{}-background".format(segment_index), split[0])
-                        tf.summary.image("5-{}-attention".format(segment_index), split[1])
-                        pass
-
                 pass
-
-            self.summary_op = tf.summary.merge_all()
             pass
+
+        self.summary_op = tf.summary.merge_all()
 
         # sess 和 saver
         self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
@@ -155,18 +163,21 @@ class Train(object):
     def cal_loss(segments, classes, label_segment, label_attention, label_classes, num_segment, attention_module_num):
 
         label_segment = tf.reshape(label_segment, [-1, ])
+        label_attention = tf.reshape(label_attention, [-1, ])
 
         loss_segments = []
-        loss_segments_attention = []
         for segment_index, segment in enumerate(segments):
             if segment_index < len(segments) - attention_module_num:
                 now_loss_segment = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=label_attention, logits=tf.reshape(segment, [-1, num_segment])))
-                loss_segments.append(now_loss_segment)
-                loss_segments_attention.append(now_loss_segment)
-            else:
-                now_loss_segment = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=label_segment, logits=tf.reshape(segment, [-1, num_segment])))
+                loss_segments.append(now_loss_segment)
+            else:
+                # now_loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+                #     targets=tf.one_hot(label_attention, depth=2), logits=tf.reshape(segment, [-1, 2]), pos_weight=3))
+                segment = tf.split(segment, num_or_size_splits=2, axis=3)[1]
+                now_loss_segment = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+                    targets=tf.cast(label_attention, dtype=tf.float32),
+                    logits=tf.reshape(segment, [-1, ]), pos_weight=3)) * 2
                 loss_segments.append(now_loss_segment)
             pass
 
@@ -176,7 +187,7 @@ class Train(object):
                 labels=label_classes, logits=class_one)))
             pass
 
-        loss_segment_all = (tf.add_n(loss_segments) + tf.add_n(loss_segments_attention)) / len(loss_segments)
+        loss_segment_all = tf.add_n(loss_segments) / len(loss_segments)
         loss_class_all = tf.add_n(loss_classes) / len(loss_classes)
         # 总损失
         loss = loss_segment_all + 0.1 * loss_class_all
@@ -249,10 +260,10 @@ class Train(object):
 
 if __name__ == '__main__':
 
-    Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/attention/first",
+    Train(batch_size=2, last_pool_size=90, input_size=[720, 720], log_dir="./model/attention/second",
           data_root_path="/home/z840/ALISURE/Data/VOC2012/", train_list="ImageSets/Segmentation/trainval.txt",
           data_path="JPEGImages/", annotation_path="SegmentationObject/", class_path="SegmentationClass/",
-          is_test=False).train(save_pred_freq=2000, begin_step=1)
+          is_test=True).train(save_pred_freq=2000, begin_step=1)
 
     # Train(batch_size=2, last_pool_size=30, input_size=[240, 240], log_dir="./model/begin/third",
     #       data_root_path="C:\\ALISURE\\DataModel\\Data\\VOCtrainval_11-May-2012\\VOCdevkit\\VOC2012\\",

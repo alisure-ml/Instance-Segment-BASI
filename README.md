@@ -47,6 +47,21 @@
 2. result in begin/third
 
 
+## train 5
+
+0. coco
+
+2. code in `5COCO`
+
+
+## train 6
+
+0. add attention
+
+1. train by voc
+
+
+
 # GUI
 
 > BAISRunnerGUI.py
