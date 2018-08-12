@@ -117,18 +117,16 @@ class Net(object):
 
 class BAISNet(object):
 
-    def __init__(self, input_data, mask_data, is_training, num_classes, num_segment,
-                 segment_attention, last_pool_size, filter_number, mask_data_num, num_attention_only):
+    def __init__(self, input_data, is_training, num_classes, num_segment,
+                 segment_attention, last_pool_size, filter_number, attention_module_num):
         self.input_data = input_data
-        self.mask_data = mask_data
         self.is_training = is_training
         self.num_classes = num_classes
         self.num_segment = num_segment
         self.segment_attention = segment_attention
         self.last_pool_size = last_pool_size
         self.filter_number = filter_number
-        self.mask_data_num = mask_data_num  # 掩码金字塔的数量（attention模块的数量）
-        self.num_attention_only = num_attention_only
+        self.attention_module_num = attention_module_num
         pass
 
     @staticmethod
@@ -487,33 +485,30 @@ class BAISNet(object):
 
     # 输入特征，输出分割结果（多个通道）
     @staticmethod
-    def _decoder(net_input_feature, mask_data, filter_number, last_pool_size, num_segment):
+    def _decoder(net_input_feature, filter_number, last_pool_size, num_segment):
         shape = tf.shape(net_input_feature)[1:3]
         output_filter_number = filter_number * 32 // 4
 
-        # attention
-        net_input_feature_multiply = tf.multiply(net_input_feature, mask_data, name="mask_multiply")
-
         now_size = last_pool_size // 1
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool1')
+        net_input = Net.avg_pool(net_input_feature, now_size, now_size, now_size, now_size, name='conv5_3_pool1')
         net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool1_conv')
         net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool1_conv_bn')
         net_input_conv5_3_pool1_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool1_interp')
 
         now_size = last_pool_size // 2
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool2')
+        net_input = Net.avg_pool(net_input_feature, now_size, now_size, now_size, now_size, name='conv5_3_pool2')
         net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool2_conv')
         net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool2_conv_bn')
         net_input_conv5_3_pool2_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool2_interp')
 
         now_size = last_pool_size // 3
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool3')
+        net_input = Net.avg_pool(net_input_feature, now_size, now_size, now_size, now_size, name='conv5_3_pool3')
         net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool3_conv')
         net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool3_conv_bn')
         net_input_conv5_3_pool3_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool3_interp')
 
         now_size = last_pool_size // 6
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool6')
+        net_input = Net.avg_pool(net_input_feature, now_size, now_size, now_size, now_size, name='conv5_3_pool6')
         net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool6_conv')
         net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool6_conv_bn')
         net_input_conv5_3_pool6_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool6_interp')
@@ -577,11 +572,13 @@ class BAISNet(object):
         attentions = []
         classes = []
 
-        mask_data = tf.split(self.mask_data, num_or_size_splits=self.mask_data_num, axis=3)
+        ######################################################
+        # 确定初始attention的输入点：建议在进入attention时输入
+        ######################################################
 
         # 解码模块，输入特征图，输出分类结果和分割结果
         segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-            net_input_feature, mask_data[0], self.filter_number, self.last_pool_size, self.num_segment)
+            net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
         segments.append(net_input_conv6_n_4_sigmoid)
 
         with tf.variable_scope(name_or_scope="attention_1"):
@@ -599,7 +596,7 @@ class BAISNet(object):
 
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[1], self.filter_number, self.last_pool_size, self.num_segment)
+                net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
             segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
@@ -618,7 +615,7 @@ class BAISNet(object):
 
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[2], self.filter_number, self.last_pool_size, 2)
+                net_input_feature, self.filter_number, self.last_pool_size, 2)
             segments.append(net_input_conv6_n_4_sigmoid)
             pass
 
@@ -637,7 +634,7 @@ class BAISNet(object):
 
             # 解码模块，输入特征图，输出分类结果和分割结果
             segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[3], self.filter_number, self.last_pool_size, 2)
+                net_input_feature, self.filter_number, self.last_pool_size, 2)
             segments.append(net_input_conv6_n_4_sigmoid)
             pass
 

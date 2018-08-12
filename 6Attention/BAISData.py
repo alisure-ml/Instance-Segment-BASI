@@ -47,7 +47,7 @@ class Data(object):
         self._now = 0
         pass
 
-    def next_batch_train(self, mask_num=4, mask_sigma=list([64, 32, 16, 8])):
+    def next_batch_train(self):
         # 打乱标签
         if self._now >= self.number_patch:
             print(".......................................................................")
@@ -72,25 +72,21 @@ class Data(object):
         for ann_index, ann in enumerate(batch_ann):
             where = np.argwhere(ann[-1] == 1)
             where = where[np.random.randint(0, len(where))]
-            batch_ann[ann_index][1] = [where[0], where[1]]
+            batch_ann[ann_index][1] = [where[0] * self.ratio, where[1] * self.ratio]
             pass
 
         # 根据初始点生成高斯Mask
-        final_batch_mask = []
+        batch_mask = []
         for ann_index, ann in enumerate(batch_ann):
-            batch_mask = []
-            for mask_num_index in range(mask_num):
-                mask_now = self._mask_gaussian((self.image_size[0] // self.ratio, self.image_size[1] // self.ratio),
-                                               ann[1], sigma=mask_sigma[mask_num_index])
-                # Image.fromarray(np.asarray(mask_now * 255, dtype=np.uint8)).show()
-                batch_mask.append(np.expand_dims(mask_now, 2))
-            mask_cat = np.concatenate(batch_mask, 2)
-            # Image.fromarray(np.asarray(mask_cat * 255, dtype=np.uint8)).show()
-            final_batch_mask.append(mask_cat)
+            batch_mask.append(self._mask_gaussian(self.image_size, ann[1]))
             pass
 
         # 数据
-        final_batch_data = [self._images_data[ann[0]] for ann in batch_ann]
+        batch_data = [self._images_data[ann[0]] for ann in batch_ann]
+
+        # 数据+MASK
+        final_batch_data = [np.concatenate((one_data, np.expand_dims(one_mask, 2)), 2)
+                            for one_data, one_mask in zip(batch_data, batch_mask)]
 
         # 标注
         final_batch_ann = [np.expand_dims(one_ann[-1], 2) for one_ann in batch_ann]
@@ -100,7 +96,7 @@ class Data(object):
         final_batch_class = [one_ann[2] for one_ann in batch_ann]
 
         self._now += 1
-        return final_batch_data, final_batch_ann, final_batch_ann_attention, final_batch_mask, final_batch_class
+        return final_batch_data, final_batch_ann, final_batch_ann_attention, final_batch_class, batch_data, batch_mask
 
     @staticmethod
     def _read_annotation(annotation_list, class_list, image_size, ratio, has_255=False):
@@ -194,9 +190,8 @@ class Data(object):
     # 测试时使用
     # 四种用途：图片名称+标注/图片数据+标注/图片名称/图片数据
     @staticmethod
-    def load_image(image_filename_or_data_raw, where, mask_num=4, image_size=(720, 720)):
-
-        raise Exception("no finish")
+    def load_image(image_filename_or_data_raw, where=None,
+                   annotation_filename=None, ann_index=0, image_size=(720, 720)):
 
         # 读取数据
         if isinstance(image_filename_or_data_raw, str):
@@ -208,17 +203,42 @@ class Data(object):
         # data_data = data_raw - IGM_MEAN
         data_data = data_raw / 255
 
-        if where is None:
-            raise Exception("where can not none")
-            pass
+        if annotation_filename is not None:
+            # 读取数据
+            ann_data = np.asarray(Image.open(annotation_filename).resize(image_size))
+            # 所有的标注数字：其中0为背景，255为边界，其他为物体
+            nums = [i for i in range(1, 255) if np.any(ann_data == i)]
+            # 所有标签的掩码
+            ann_mask = [np.where(ann_data == i, 1, 0) for i in nums]
 
-        # 根据初始点生成高斯Mask
-        gaussian_mask = Data._mask_gaussian(image_size, where)
+            # 选取初始点的位置
+            where = np.argwhere(ann_mask[ann_index] == 1)
+            where = where[np.random.randint(0, len(where))]
 
-        # 数据+MASK
-        final_batch_data = [np.concatenate((data_data, np.expand_dims(gaussian_mask, 2)), 2)]
+            if where is None:
+                raise Exception("where can not none")
+                pass
 
-        return final_batch_data, data_raw, gaussian_mask
+            # 根据初始点生成高斯Mask
+            gaussian_mask = Data._mask_gaussian(image_size, where)
+
+            # 数据+MASK
+            final_batch_data = [np.concatenate((data_data, np.expand_dims(gaussian_mask, 2)), 2)]
+
+            return final_batch_data, data_raw, gaussian_mask, ann_data, ann_mask[ann_index]
+        else:
+            if where is None:
+                raise Exception("where can not none")
+                pass
+
+            # 根据初始点生成高斯Mask
+            gaussian_mask = Data._mask_gaussian(image_size, where)
+
+            # 数据+MASK
+            final_batch_data = [np.concatenate((data_data, np.expand_dims(gaussian_mask, 2)), 2)]
+
+            return final_batch_data, data_raw, gaussian_mask
+        pass
 
     pass
 
@@ -229,6 +249,6 @@ if __name__ == '__main__':
     #              data_list="ImageSets/Segmentation/train.txt")
     _data = Data(is_test=True)
     for i in range(20):
-        (final_batch_data, final_batch_ann, final_batch_ann_attention, final_batch_mask,
-         final_batch_class) = _data.next_batch_train(mask_num=4)
+        (final_batch_data, final_batch_ann, final_batch_ann_attention,
+         final_batch_class, batch_data, batch_mask) = _data.next_batch_train()
         pass

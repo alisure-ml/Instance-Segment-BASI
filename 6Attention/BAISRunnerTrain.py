@@ -28,9 +28,7 @@ class Train(object):
         self.num_classes = 21
         self.num_segment = 4  # 解码通道数：其他对象、attention、边界、背景
         self.segment_attention = 1  # 当解码的通道数是4时，attention所在的位置
-
-        self.num_attention_module = 2  # attention模块的数量
-        self.num_attention_only = 2  # attention模块中，解码通道数是2（背景、attention）的模块个数
+        self.attention_module_num = 2  # attention模块中，解码通道数是2（背景、attention）的模块个数
 
         # 和模型相关的参数：必须保证input_size大于8倍的last_pool_size
         self.ratio = 8
@@ -49,10 +47,8 @@ class Train(object):
                                 is_test=is_test, has_255=True)
 
         # 数据
-        self.image_placeholder = tf.placeholder(
-            dtype=tf.float32, shape=(None, self.input_size[0], self.input_size[1], 3))
-        self.mask_placeholder = tf.placeholder(
-            dtype=tf.float32, shape=(None, self.input_size[0] // self.ratio, self.input_size[1] // self.ratio, 4))
+        self.image_placeholder = tf.placeholder(dtype=tf.float32,
+                                                shape=(None, self.input_size[0], self.input_size[1], 4))
         self.label_segment_placeholder = tf.placeholder(
             dtype=tf.int32, shape=(None, self.input_size[0] // self.ratio, self.input_size[1] // self.ratio, 1))
         self.label_attention_placeholder = tf.placeholder(
@@ -60,11 +56,10 @@ class Train(object):
         self.label_classes_placeholder = tf.placeholder(dtype=tf.int32, shape=(None,))
 
         # 网络
-        self.net = BAISNet(self.image_placeholder, self.mask_placeholder, is_training=True,
-                           num_classes=self.num_classes, num_segment=self.num_segment,
-                           segment_attention=self.segment_attention, last_pool_size=self.last_pool_size,
-                           filter_number=self.filter_number, mask_data_num=self.num_attention_module,
-                           num_attention_only=self.num_attention_only)
+        self.net = BAISNet(self.image_placeholder, is_training=True, num_classes=self.num_classes,
+                           num_segment=self.num_segment, segment_attention=self.segment_attention,
+                           last_pool_size=self.last_pool_size, filter_number=self.filter_number,
+                           attention_module_num=self.attention_module_num)
 
         self.segments, self.attentions, self.classes = self.net.build()
         self.final_segment_logit = self.segments[0]
@@ -81,7 +76,7 @@ class Train(object):
             self.label_attention_placeholder, tf.stack(self.final_segment_logit.get_shape()[1:3]))
         self.loss, self.loss_segment_all, self.loss_class_all, self.loss_segments, self.loss_classes = self.cal_loss(
             self.segments, self.classes, self.label_batch, self.label_attention_batch,
-            self.label_classes_placeholder, self.num_segment, num_attention_only=self.num_attention_only)
+            self.label_classes_placeholder, self.num_segment, attention_module_num=self.attention_module_num)
 
         # 当前批次的准确率：accuracy
         self.accuracy_segment = tcm.accuracy(self.pred_segment, self.label_segment_placeholder)
@@ -165,14 +160,14 @@ class Train(object):
         pass
 
     @staticmethod
-    def cal_loss(segments, classes, label_segment, label_attention, label_classes, num_segment, num_attention_only):
+    def cal_loss(segments, classes, label_segment, label_attention, label_classes, num_segment, attention_module_num):
 
         label_segment = tf.reshape(label_segment, [-1, ])
         label_attention = tf.reshape(label_attention, [-1, ])
 
         loss_segments = []
         for segment_index, segment in enumerate(segments):
-            if segment_index < len(segments) - num_attention_only:
+            if segment_index < len(segments) - attention_module_num:
                 now_loss_segment = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=label_segment, logits=tf.reshape(segment, [-1, num_segment])))
                 loss_segments.append(now_loss_segment)
@@ -205,8 +200,8 @@ class Train(object):
         for step in range(begin_step, self.num_steps):
             start_time = time.time()
 
-            (final_batch_data, final_batch_ann, final_batch_ann_attention,
-             final_batch_mask, final_batch_class) = self.data_reader.next_batch_train()
+            final_batch_data, final_batch_ann, final_batch_ann_attention, final_batch_class, batch_data, batch_mask = \
+                self.data_reader.next_batch_train()
 
             # train_op = self.train_attention_op
             train_op = self.train_op
@@ -224,7 +219,6 @@ class Train(object):
                      self.final_segment_logit, self.pred_segment, self.final_class_logit, self.pred_classes,
                      self.summary_op],
                     feed_dict={self.step_ph: step, self.image_placeholder: final_batch_data,
-                               self.mask_placeholder: final_batch_mask,
                                self.label_segment_placeholder: final_batch_ann,
                                self.label_attention_placeholder: final_batch_ann_attention,
                                self.label_classes_placeholder: final_batch_class})
@@ -239,7 +233,6 @@ class Train(object):
                      self.loss_segment_all, self.loss_class_all, self.loss,
                      self.final_segment_logit, self.pred_segment, self.final_class_logit, self.pred_classes],
                     feed_dict={self.step_ph: step, self.image_placeholder: final_batch_data,
-                               self.mask_placeholder: final_batch_mask,
                                self.label_segment_placeholder: final_batch_ann,
                                self.label_attention_placeholder: final_batch_ann_attention,
                                self.label_classes_placeholder: final_batch_class})
