@@ -47,7 +47,7 @@ class Data(object):
         self._now = 0
         pass
 
-    def next_batch_train(self, mask_num=4, mask_sigma=list([64, 32, 16, 8])):
+    def next_batch_train(self, mask_num=4, mask_sigma=list([90, 60, 30, 10])):
         # 打乱标签
         if self._now >= self.number_patch:
             print(".......................................................................")

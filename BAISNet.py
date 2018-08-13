@@ -118,7 +118,7 @@ class Net(object):
 class BAISNet(object):
 
     def __init__(self, input_data, mask_data, is_training, num_classes, num_segment,
-                 segment_attention, last_pool_size, filter_number, mask_data_num, num_attention_only):
+                 segment_attention, last_pool_size, filter_number, mask_data_num):
         self.input_data = input_data
         self.mask_data = mask_data
         self.is_training = is_training
@@ -128,12 +128,11 @@ class BAISNet(object):
         self.last_pool_size = last_pool_size
         self.filter_number = filter_number
         self.mask_data_num = mask_data_num  # 掩码金字塔的数量（attention模块的数量）
-        self.num_attention_only = num_attention_only
         pass
 
     @staticmethod
     def _feature(net_input, filter_number):
-        net_input = Net.conv(net_input, 3, 3, filter_number, 2, 2, biased=False, relu=False, padding='SAME', name='conv1_1_3x3_s2_n')
+        net_input = Net.conv(net_input, 3, 3, filter_number, 2, 2, biased=False, relu=False, padding='SAME', name='conv1_1_3x3_s2_n_attention')
         net_input = Net.batch_normalization(net_input, relu=False, name='conv1_1_3x3_s2_bn')
         net_input = Net.relu(net_input, name='conv1_1_3x3_s2_bn_relu')
         net_input = Net.conv(net_input, 3, 3, filter_number, 1, 1, biased=False, relu=False, padding='SAME', name='conv1_2_3x3')
@@ -487,7 +486,7 @@ class BAISNet(object):
 
     # 输入特征，输出分割结果（多个通道）
     @staticmethod
-    def _decoder(net_input_feature, mask_data, filter_number, last_pool_size, num_segment):
+    def _decoder_old(net_input_feature, mask_data, filter_number, last_pool_size, num_segment):
         shape = tf.shape(net_input_feature)[1:3]
         output_filter_number = filter_number * 32 // 4
 
@@ -523,6 +522,29 @@ class BAISNet(object):
         net_input = Net.conv(net_input, 3, 3, output_filter_number, 1, 1, biased=False, relu=False, padding='SAME', name='conv5_4')
         net_input = Net.batch_normalization(net_input, relu=True, name='conv5_4_bn')
         net_input_conv6_n_4 = Net.conv(net_input, 1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_4')
+        net_input_conv6_n_4_relu = Net.relu(net_input_conv6_n_4, name='conv6_n_4/relu')
+        net_input_conv6_n_4_sigmoid = Net.sigmoid(net_input_conv6_n_4, name='conv6_n_4/sigmoid')
+        net_input_conv6_n_4_softmax = Net.softmax(net_input_conv6_n_4, name='conv6_n_4/softmax')
+
+        return net_input_conv6_n_4, net_input_conv6_n_4_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax
+
+    # 输入特征，输出分割结果（多个通道）
+    @staticmethod
+    def _decoder(input_feature, attention_feature, mask_data, filter_number, num_segment):
+        # attention
+        feature_multiply = tf.multiply(input_feature, mask_data, name="mask_multiply")
+        net_input = Net.concat([input_feature, attention_feature, feature_multiply], axis=-1, name='conv5_3_concat')
+
+        net_input = Net.conv(net_input, 3, 3, filter_number * 32, 1, 1,
+                             biased=False, relu=False, padding='SAME', name='conv5_4_multiply_1')
+        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_4_bn_1')
+
+        net_input = Net.conv(net_input, 3, 3, filter_number * 8, 1, 1,
+                             biased=False, relu=False, padding='SAME', name='conv5_4_multiply')
+        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_4_bn')
+
+        net_input_conv6_n_4 = Net.conv(net_input, 1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_4')
+
         net_input_conv6_n_4_relu = Net.relu(net_input_conv6_n_4, name='conv6_n_4/relu')
         net_input_conv6_n_4_sigmoid = Net.sigmoid(net_input_conv6_n_4, name='conv6_n_4/sigmoid')
         net_input_conv6_n_4_softmax = Net.softmax(net_input_conv6_n_4, name='conv6_n_4/softmax')
@@ -653,7 +675,7 @@ class BAISNet(object):
     # 从大变小
     def build_large2small(self):
         # 提取特征，属于公共部分
-        net_input_feature = self._feature(self.input_data, self.filter_number)
+        input_feature = self._feature(self.input_data, self.filter_number)
 
         segments = []
         attentions = []
@@ -663,70 +685,39 @@ class BAISNet(object):
 
         # 解码模块，输入特征图，输出分类结果和分割结果
         segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-            net_input_feature, mask_data[0], self.filter_number, self.last_pool_size, self.num_segment)
+            input_feature, input_feature, mask_data[0], self.filter_number, self.num_segment)
         segments.append(net_input_conv6_n_4_sigmoid)
 
-        with tf.variable_scope(name_or_scope="attention_1"):
-            # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
-            attentions.append(attention)
+        for i in range(1, self.mask_data_num):
+            with tf.variable_scope(name_or_scope="attention_{}".format(i)):
+                # attention（一个通道）
+                attention = tf.split(net_input_conv6_n_4_softmax,
+                                     num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
+                attentions.append(attention)
 
-            # 使用attention
-            net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
+                # 使用attention
+                attention_feature = tf.multiply(input_feature, attention, name="class_attention_multiply")
 
-            # 分类
-            class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-            classes.append(class_fc)
+                # 分类
+                class_fc = self._classifies(attention_feature, self.last_pool_size, self.filter_number, self.num_classes)
+                classes.append(class_fc)
 
-            # 解码模块，输入特征图，输出分类结果和分割结果
-            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[1], self.filter_number, self.last_pool_size, self.num_segment)
-            segments.append(net_input_conv6_n_4_sigmoid)
+                # 解码模块，输入特征图，输出分类结果和分割结果
+                (segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid,
+                 net_input_conv6_n_4_softmax) = self._decoder(
+                    input_feature, attention_feature, mask_data[i], self.filter_number,
+                    2 if self.mask_data_num - 1 == i else self.num_segment)
+                segments.append(net_input_conv6_n_4_sigmoid)
+                pass
             pass
 
-        with tf.variable_scope(name_or_scope="attention_2"):
-            # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
-            attentions.append(attention)
-
-            # 使用attention
-            net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
-
-            # 分类
-            class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-            classes.append(class_fc)
-
-            # 解码模块，输入特征图，输出分类结果和分割结果
-            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[2], self.filter_number, self.last_pool_size, 2)
-            segments.append(net_input_conv6_n_4_sigmoid)
-            pass
-
-        with tf.variable_scope(name_or_scope="attention_3"):
-            # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[1]
-            attentions.append(attention)
-
-            # 使用attention
-            net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
-
-            # 分类
-            class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-            classes.append(class_fc)
-
-            # 解码模块，输入特征图，输出分类结果和分割结果
-            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[3], self.filter_number, self.last_pool_size, 2)
-            segments.append(net_input_conv6_n_4_sigmoid)
-            pass
-
-        attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[1]
+        attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[self.segment_attention]
         attentions.append(attention)
 
         # 使用attention
-        net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
+        attention_feature = tf.multiply(input_feature, attention, name="class_attention_multiply")
 
-        class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
+        class_fc = self._classifies(attention_feature, self.last_pool_size, self.filter_number, self.num_classes)
         classes.append(class_fc)
 
         return segments, attentions, classes

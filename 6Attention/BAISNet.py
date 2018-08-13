@@ -588,7 +588,7 @@ class BAISNet(object):
 
             # 使用attention
             multiply = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
-            net_input_feature = multiply * 2
+            net_input_feature = multiply * 1
 
             # 分类
             class_fc = self._classifies(multiply, self.last_pool_size, self.filter_number, self.num_classes)
