@@ -1,5 +1,7 @@
 import numpy as np
 import tensorflow as tf
+from BAISTools import Tools
+from nets import nets_factory
 
 
 class Net(object):
@@ -115,611 +117,254 @@ class Net(object):
     pass
 
 
-class BAISNet(object):
+class LinkNet(object):
 
-    def __init__(self, input_data, mask_data, is_training, num_classes, num_segment,
-                 segment_attention, last_pool_size, filter_number, mask_data_num):
+    def __init__(self, input_data, is_training, num_classes):
         self.input_data = input_data
-        self.mask_data = mask_data
         self.is_training = is_training
         self.num_classes = num_classes
-        self.num_segment = num_segment
-        self.segment_attention = segment_attention
-        self.last_pool_size = last_pool_size
-        self.filter_number = filter_number
-        self.mask_data_num = mask_data_num  # 掩码金字塔的数量（attention模块的数量）
         pass
 
-    @staticmethod
-    def _feature(net_input, filter_number):
-        net_input = Net.conv(net_input, 3, 3, filter_number, 2, 2, biased=False, relu=False, padding='SAME', name='conv1_1_3x3_s2_n_attention')
-        net_input = Net.batch_normalization(net_input, relu=False, name='conv1_1_3x3_s2_bn')
-        net_input = Net.relu(net_input, name='conv1_1_3x3_s2_bn_relu')
-        net_input = Net.conv(net_input, 3, 3, filter_number, 1, 1, biased=False, relu=False, padding='SAME', name='conv1_2_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv1_2_3x3_bn')
-        net_input = Net.conv(net_input, 3, 3, filter_number * 2, 1, 1, biased=False, relu=False, padding='SAME', name='conv1_3_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv1_3_3x3_bn')
-        net_input_pool1_3x3_s2 = Net.max_pool(net_input, 3, 3, 2, 2, padding='SAME', name='pool1_3x3_s2')
-        net_input = Net.conv(net_input_pool1_3x3_s2, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv2_1_1x1_proj')
-        net_input_conv2_1_1x1_proj_bn = Net.batch_normalization(net_input, relu=False, name='conv2_1_1x1_proj_bn')
+    def _feature(self, net_input):
+        self.network_fn = nets_factory.get_network_fn("vgg_16", num_classes=None,
+                                                      weight_decay=0.00004, is_training=True)
+        logits, end_points = self.network_fn(net_input)
+        block1 = end_points['vgg_16/conv2/conv2_2']
+        block2 = end_points['vgg_16/conv3/conv3_3']
+        block3 = end_points['vgg_16/conv4/conv4_3']
+        block4 = end_points['vgg_16/conv5/conv5_3']
+        return block1, block2, block3, block4
 
-        net_input = Net.conv(net_input_pool1_3x3_s2, 1, 1, filter_number, 1, 1, biased=False, relu=False, name='conv2_1_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv2_1_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding1')
-        net_input = Net.conv(net_input, 3, 3, filter_number, 1, 1, biased=False, relu=False, name='conv2_1_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv2_1_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv2_1_1x1_increase')
-        net_input_conv2_1_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv2_1_1x1_increase_bn')
+    def _decoder(self, net_input, input_size, output_size, name):
+        with tf.variable_scope(name_or_scope=name):
+            net_output = Net.conv(net_input, 1, 1, input_size[-1] // 4, 1, 1,
+                                  biased=True, relu=True, padding='SAME', name='d_s_conv_1')
 
-        net_input = Net.add([net_input_conv2_1_1x1_proj_bn, net_input_conv2_1_1x1_increase_bn], name='conv2_1')
-        net_input_conv2_1_relu = Net.relu(net_input, name='conv2_1/relu')
-        net_input = Net.conv(net_input_conv2_1_relu, 1, 1, filter_number, 1, 1, biased=False, relu=False, name='conv2_2_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv2_2_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding2')
-        net_input = Net.conv(net_input, 3, 3, filter_number, 1, 1, biased=False, relu=False, name='conv2_2_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv2_2_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv2_2_1x1_increase')
-        net_input_conv2_2_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv2_2_1x1_increase_bn')
+            net_output = tf.image.resize_nearest_neighbor(net_output, output_size[:2])
+            net_output = Net.conv(net_output, 3, 3, input_size[-1] // 4, 1, 1,
+                                  biased=True, relu=True, padding='SAME', name='d_s_conv_2')
 
-        net_input = Net.add([net_input_conv2_1_relu, net_input_conv2_2_1x1_increase_bn], name='conv2_2')
-        net_input_conv2_2_relu = Net.relu(net_input, name='conv2_2/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number, 1, 1, biased=False, relu=False, name='conv2_3_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv2_3_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding3')
-        net_input = Net.conv(net_input, 3, 3, filter_number, 1, 1, biased=False, relu=False, name='conv2_3_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv2_3_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv2_3_1x1_increase')
-        net_input_conv2_3_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv2_3_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv2_2_relu, net_input_conv2_3_1x1_increase_bn], name='conv2_3')
-        net_input_conv2_3_relu = Net.relu(net_input, name='conv2_3/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 2, 2, biased=False, relu=False, name='conv3_1_1x1_proj')
-        net_input_conv3_1_1x1_proj_bn = Net.batch_normalization(net_input, relu=False, name='conv3_1_1x1_proj_bn')
-
-        net_input = Net.conv(net_input_conv2_3_relu, 1, 1, filter_number * 2, 2, 2, biased=False, relu=False, name='conv3_1_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_1_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding4')
-        net_input = Net.conv(net_input, 3, 3, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_1_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_1_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv3_1_1x1_increase')
-        net_input_conv3_1_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv3_1_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv3_1_1x1_proj_bn, net_input_conv3_1_1x1_increase_bn], name='conv3_1')
-        net_input_conv3_1_relu = Net.relu(net_input, name='conv3_1/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_2_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_2_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding5')
-        net_input = Net.conv(net_input, 3, 3, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_2_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_2_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv3_2_1x1_increase')
-        net_input_conv3_2_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv3_2_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv3_1_relu, net_input_conv3_2_1x1_increase_bn], name='conv3_2')
-        net_input_conv3_2_relu = Net.relu(net_input, name='conv3_2/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_3_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_3_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding6')
-        net_input = Net.conv(net_input, 3, 3, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_3_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_3_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv3_3_1x1_increase')
-        net_input_conv3_3_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv3_3_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv3_2_relu, net_input_conv3_3_1x1_increase_bn], name='conv3_3')
-        net_input_conv3_3_relu = Net.relu(net_input, name='conv3_3/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_4_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_4_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=1, name='padding7')
-        net_input = Net.conv(net_input, 3, 3, filter_number * 2, 1, 1, biased=False, relu=False, name='conv3_4_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv3_4_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv3_4_1x1_increase')
-        net_input_conv3_4_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv3_4_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv3_3_relu, net_input_conv3_4_1x1_increase_bn], name='conv3_4')
-        net_input_conv3_4relu = Net.relu(net_input, name='conv3_4/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_1_1x1_proj')
-        net_input_conv4_1_1x1_proj_bn = Net.batch_normalization(net_input, relu=False, name='conv4_1_1x1_proj_bn')
-
-        net_input = Net.conv(net_input_conv3_4relu, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_1_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_1_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding8')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_1_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_1_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_1_1x1_increase')
-        net_input_conv4_1_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_1_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_1_1x1_proj_bn, net_input_conv4_1_1x1_increase_bn], name='conv4_1')
-        net_input_conv4_1_relu = Net.relu(net_input, name='conv4_1/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_2_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_2_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding9')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_2_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_2_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_2_1x1_increase')
-        net_input_conv4_2_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_2_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_1_relu, net_input_conv4_2_1x1_increase_bn], name='conv4_2')
-        net_input_conv4_2_relu = Net.relu(net_input, name='conv4_2/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_3_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_3_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding10')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_3_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_3_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_3_1x1_increase')
-        net_input_conv4_3_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_3_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_2_relu, net_input_conv4_3_1x1_increase_bn], name='conv4_3')
-        net_input_conv4_3_relu = Net.relu(net_input, name='conv4_3/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_4_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_4_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding11')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_4_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_4_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_4_1x1_increase')
-        net_input_conv4_4_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_4_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_3_relu, net_input_conv4_4_1x1_increase_bn], name='conv4_4')
-        net_input_conv4_4_relu = Net.relu(net_input, name='conv4_4/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_5_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_5_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding12')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_5_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_5_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_5_1x1_increase')
-        net_input_conv4_5_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_5_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_4_relu, net_input_conv4_5_1x1_increase_bn], name='conv4_5')
-        net_input_conv4_5_relu = Net.relu(net_input, name='conv4_5/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_6_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_6_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding13')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_6_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_6_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_6_1x1_increase')
-        net_input_conv4_6_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_6_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_5_relu, net_input_conv4_6_1x1_increase_bn], name='conv4_6')
-        net_input_conv4_6_relu = Net.relu(net_input, name='conv4_6/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_7_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_7_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding14')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_7_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_7_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_7_1x1_increase')
-        net_input_conv4_7_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_7_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_6_relu, net_input_conv4_7_1x1_increase_bn], name='conv4_7')
-        net_input_conv4_7_relu = Net.relu(net_input, name='conv4_7/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_8_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_8_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding15')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_8_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_8_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_8_1x1_increase')
-        net_input_conv4_8_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_8_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_7_relu, net_input_conv4_8_1x1_increase_bn], name='conv4_8')
-        net_input_conv4_8_relu = Net.relu(net_input, name='conv4_8/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_9_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_9_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding16')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_9_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_9_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_9_1x1_increase')
-        net_input_conv4_9_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_9_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_8_relu, net_input_conv4_9_1x1_increase_bn], name='conv4_9')
-        net_input_conv4_9_relu = Net.relu(net_input, name='conv4_9/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_10_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_10_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding17')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_10_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_10_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_10_1x1_increase')
-        net_input_conv4_10_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_10_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_9_relu, net_input_conv4_10_1x1_increase_bn], name='conv4_10')
-        net_input_conv4_10_relu = Net.relu(net_input, name='conv4_10/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_11_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_11_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding18')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_11_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_11_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_11_1x1_increase')
-        net_input_conv4_11_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_11_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_10_relu, net_input_conv4_11_1x1_increase_bn], name='conv4_11')
-        net_input_conv4_11_relu = Net.relu(net_input, name='conv4_11/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_12_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_12_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding19')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_12_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_12_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_12_1x1_increase')
-        net_input_conv4_12_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_12_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_11_relu, net_input_conv4_12_1x1_increase_bn], name='conv4_12')
-        net_input_conv4_12_relu = Net.relu(net_input, name='conv4_12/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_13_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_13_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding20')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_13_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_13_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_13_1x1_increase')
-        net_input_conv4_13_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_13_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_12_relu, net_input_conv4_13_1x1_increase_bn], name='conv4_13')
-        net_input_conv4_13_relu = Net.relu(net_input, name='conv4_13/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_14_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_14_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding21')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_14_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_14_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_14_1x1_increase')
-        net_input_conv4_14_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_14_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_13_relu, net_input_conv4_14_1x1_increase_bn], name='conv4_14')
-        net_input_conv4_14_relu = Net.relu(net_input, name='conv4_14/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_15_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_15_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding22')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_15_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_15_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_15_1x1_increase')
-        net_input_conv4_15_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_15_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_14_relu, net_input_conv4_15_1x1_increase_bn], name='conv4_15')
-        net_input_conv4_15_relu = Net.relu(net_input, name='conv4_15/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_16_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_16_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding23')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_16_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_16_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_16_1x1_increase')
-        net_input_conv4_16_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_16_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_15_relu, net_input_conv4_16_1x1_increase_bn], name='conv4_16')
-        net_input_conv4_16_relu = Net.relu(net_input, name='conv4_16/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_17_1x1_reduce')
-        net_input = Net .batch_normalization(net_input, relu=True, name='conv4_17_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding24')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_17_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_17_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_17_1x1_increase')
-        net_input_conv4_17_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_17_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_16_relu, net_input_conv4_17_1x1_increase_bn], name='conv4_17')
-        net_input_conv4_17_relu = Net.relu(net_input, name='conv4_17/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_18_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_18_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding25')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_18_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_18_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_18_1x1_increase')
-        net_input_conv4_18_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_18_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_17_relu, net_input_conv4_18_1x1_increase_bn], name='conv4_18')
-        net_input_conv4_18_relu = Net.relu(net_input, name='conv4_18/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_19_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_19_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding26')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_19_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_19_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_19_1x1_increase')
-        net_input_conv4_19_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_19_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_18_relu, net_input_conv4_19_1x1_increase_bn], name='conv4_19')
-        net_input_conv4_19_relu = Net.relu(net_input, name='conv4_19/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_20_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_20_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding27')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_20_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_20_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_20_1x1_increase')
-        net_input_conv4_20_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_20_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_19_relu, net_input_conv4_20_1x1_increase_bn], name='conv4_20')
-        net_input_conv4_20_relu = Net.relu(net_input, name='conv4_20/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_21_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_21_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding28')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_21_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_21_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_21_1x1_increase')
-        net_input_conv4_21_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_21_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_20_relu, net_input_conv4_21_1x1_increase_bn], name='conv4_21')
-        net_input_conv4_21_relu = Net.relu(net_input, name='conv4_21/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_22_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_22_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding29')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_22_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_22_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_22_1x1_increase')
-        net_input_conv4_22_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_22_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_21_relu, net_input_conv4_22_1x1_increase_bn], name='conv4_22')
-        net_input_conv4_22_relu = Net.relu(net_input, name='conv4_22/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 4, 1, 1, biased=False, relu=False, name='conv4_23_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_23_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=2, name='padding30')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 4, 2, biased=False, relu=False, name='conv4_23_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv4_23_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 16, 1, 1, biased=False, relu=False, name='conv4_23_1x1_increase')
-        net_input_conv4_23_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv4_23_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv4_22_relu, net_input_conv4_23_1x1_increase_bn], name='conv4_23')
-        net_input_conv4_23_relu = Net.relu(net_input, name='conv4_23/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 32, 1, 1, biased=False, relu=False, name='conv5_1_1x1_proj')
-        net_input_conv5_1_1x1_proj_bn = Net.batch_normalization(net_input, relu=False, name='conv5_1_1x1_proj_bn')
-
-        net_input = Net.conv(net_input_conv4_23_relu, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv5_1_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_1_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=4, name='padding31')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 8, 4, biased=False, relu=False, name='conv5_1_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_1_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 32, 1, 1, biased=False, relu=False, name='conv5_1_1x1_increase')
-        net_input_conv5_1_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv5_1_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv5_1_1x1_proj_bn, net_input_conv5_1_1x1_increase_bn], name='conv5_1')
-        net_input_conv5_1_relu = Net.relu(net_input, name='conv5_1/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv5_2_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_2_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=4, name='padding32')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 8, 4, biased=False, relu=False, name='conv5_2_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_2_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 32, 1, 1, biased=False, relu=False, name='conv5_2_1x1_increase')
-        net_input_conv5_2_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv5_2_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv5_1_relu, net_input_conv5_2_1x1_increase_bn], name='conv5_2')
-        net_input_conv5_2_relu = Net.relu(net_input, name='conv5_2/relu')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 8, 1, 1, biased=False, relu=False, name='conv5_3_1x1_reduce')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_1x1_reduce_bn')
-        net_input = Net.zero_padding(net_input, padding=4, name='padding33')
-        net_input = Net.atrous_conv(net_input, 3, 3, filter_number * 8, 4, biased=False, relu=False, name='conv5_3_3x3')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_3x3_bn')
-        net_input = Net.conv(net_input, 1, 1, filter_number * 32, 1, 1, biased=False, relu=False, name='conv5_3_1x1_increase')
-        net_input_conv5_3_1x1_increase_bn = Net.batch_normalization(net_input, relu=False, name='conv5_3_1x1_increase_bn')
-
-        net_input = Net.add([net_input_conv5_2_relu, net_input_conv5_3_1x1_increase_bn], name='conv5_3')
-        net_input_conv5_3_relu = Net.relu(net_input, name='conv5_3/relu')
-        return net_input_conv5_3_relu  # 解码器的输入
-
-    # 输入特征，输出分割结果（多个通道）
-    @staticmethod
-    def _decoder_old(net_input_feature, mask_data, filter_number, last_pool_size, num_segment):
-        shape = tf.shape(net_input_feature)[1:3]
-        output_filter_number = filter_number * 32 // 4
-
-        # attention
-        net_input_feature_multiply = tf.multiply(net_input_feature, mask_data, name="mask_multiply")
-
-        now_size = last_pool_size // 1
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool1')
-        net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool1_conv')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool1_conv_bn')
-        net_input_conv5_3_pool1_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool1_interp')
-
-        now_size = last_pool_size // 2
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool2')
-        net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool2_conv')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool2_conv_bn')
-        net_input_conv5_3_pool2_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool2_interp')
-
-        now_size = last_pool_size // 3
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool3')
-        net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool3_conv')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool3_conv_bn')
-        net_input_conv5_3_pool3_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool3_interp')
-
-        now_size = last_pool_size // 6
-        net_input = Net.avg_pool(net_input_feature_multiply, now_size, now_size, now_size, now_size, name='conv5_3_pool6')
-        net_input = Net.conv(net_input, 1, 1, output_filter_number, 1, 1, biased=False, relu=False, name='conv5_3_pool6_conv')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_3_pool6_conv_bn')
-        net_input_conv5_3_pool6_interp = Net.resize_bilinear(net_input, shape, name='conv5_3_pool6_interp')
-
-        net_input = Net.concat([net_input_feature, net_input_conv5_3_pool6_interp, net_input_conv5_3_pool3_interp,
-                                net_input_conv5_3_pool2_interp, net_input_conv5_3_pool1_interp], axis=-1, name='conv5_3_concat')
-        net_input = Net.conv(net_input, 3, 3, output_filter_number, 1, 1, biased=False, relu=False, padding='SAME', name='conv5_4')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_4_bn')
-        net_input_conv6_n_4 = Net.conv(net_input, 1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_4')
-        net_input_conv6_n_4_relu = Net.relu(net_input_conv6_n_4, name='conv6_n_4/relu')
-        net_input_conv6_n_4_sigmoid = Net.sigmoid(net_input_conv6_n_4, name='conv6_n_4/sigmoid')
-        net_input_conv6_n_4_softmax = Net.softmax(net_input_conv6_n_4, name='conv6_n_4/softmax')
-
-        return net_input_conv6_n_4, net_input_conv6_n_4_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax
-
-    # 输入特征，输出分割结果（多个通道）
-    @staticmethod
-    def _decoder(input_feature, attention_feature, mask_data, filter_number, num_segment):
-        # attention
-        feature_multiply = tf.multiply(input_feature, mask_data, name="mask_multiply")
-        net_input = Net.concat([input_feature, attention_feature, feature_multiply], axis=-1, name='conv5_3_concat')
-
-        net_input = Net.conv(net_input, 3, 3, filter_number * 32, 1, 1,
-                             biased=False, relu=False, padding='SAME', name='conv5_4_multiply_1')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_4_bn_1')
-
-        net_input = Net.conv(net_input, 3, 3, filter_number * 8, 1, 1,
-                             biased=False, relu=False, padding='SAME', name='conv5_4_multiply')
-        net_input = Net.batch_normalization(net_input, relu=True, name='conv5_4_bn')
-
-        net_input_conv6_n_4 = Net.conv(net_input, 1, 1, num_segment, 1, 1, biased=True, relu=False, name='conv6_n_4')
-
-        net_input_conv6_n_4_relu = Net.relu(net_input_conv6_n_4, name='conv6_n_4/relu')
-        net_input_conv6_n_4_sigmoid = Net.sigmoid(net_input_conv6_n_4, name='conv6_n_4/sigmoid')
-        net_input_conv6_n_4_softmax = Net.softmax(net_input_conv6_n_4, name='conv6_n_4/softmax')
-
-        return net_input_conv6_n_4, net_input_conv6_n_4_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax
-
-    # 输入特征和分割attention得分图（一个通道），输出类别
-    @staticmethod
-    def _classifies(net_input_multiply, last_pool_size, filter_number, num_classes):
-        pool_ratio = 5
-        pool_size = last_pool_size // pool_ratio
-        net_input = Net.avg_pool(net_input_multiply, pool_size, pool_size, pool_size, pool_size,
-                                 name="class_attention_pool")
-        net_input = Net.conv(net_input, pool_ratio, pool_ratio, filter_number * 16, pool_ratio, pool_ratio,
-                             name="class_attention_conv")
-        net_input = Net.squeeze(net_input, name="class_attention_squeeze")
-        net_input_class_attention_fc = Net.fc(net_input, num_out=num_classes, relu=False,
-                                              name="class_attention_fc")
-        return net_input_class_attention_fc
-
-    @staticmethod
-    def _attention():
-        # with tf.variable_scope(name_or_scope="attention_2"):
-        #     # attention（一个通道）
-        #     attention = tf.split(segment_output, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
-        #     attentions.append(attention)
-        #
-        #     # 使用attention
-        #     multiply = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
-        #
-        #     # 分类
-        #     class_fc = self._classifies(multiply, self.last_pool_size, self.filter_number, self.num_classes)
-        #     classes.append(class_fc)
-        #
-        #     # 多出的部分
-        #     # concat = Net.concat([net_input_feature, multiply], axis=-1, name="class_attention_concat")
-        #     # net_input_feature = Net.conv(concat, 1, 1, net_input_feature.get_shape()[-1], 1, 1, name="class_attention_sample")
-        #     net_input_feature = multiply * 2
-        #
-        #     # 解码模块，输入特征图，输出分类结果和分割结果
-        #     segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid = self._decoder(
-        #         net_input_feature, self.filter_number, self.last_pool_size, self.num_segment)
-        #     segments.append(segment_output)
-        #     pass
-        pass
-
-    # 从小变大
-    def build_small2large(self):
-        # 提取特征，属于公共部分
-        net_input_feature = self._feature(self.input_data, self.filter_number)
-
-        segments = []
-        attentions = []
-        classes = []
-
-        mask_data = tf.split(self.mask_data, num_or_size_splits=self.mask_data_num, axis=3)
-
-        # 解码模块，输入特征图，输出分类结果和分割结果
-        segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-            net_input_feature, mask_data[0], self.filter_number, self.last_pool_size, self.num_segment)
-        segments.append(net_input_conv6_n_4_sigmoid)
-
-        with tf.variable_scope(name_or_scope="attention_1"):
-            # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
-            attentions.append(attention)
-
-            # 使用attention
-            net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
-
-            # 分类
-            class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-            classes.append(class_fc)
-
-            # 解码模块，输入特征图，输出分类结果和分割结果
-            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[1], self.filter_number, self.last_pool_size, self.num_segment)
-            segments.append(net_input_conv6_n_4_sigmoid)
+            net_output = Net.conv(net_output, 1, 1, output_size[-1], 1, 1,
+                                  biased=True, relu=True, name='d_s_conv_3')
             pass
+        return net_output
 
-        with tf.variable_scope(name_or_scope="attention_2"):
-            # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
-            attentions.append(attention)
+    def _segment(self, net_input, input_size, output_size, name):
+        with tf.variable_scope(name_or_scope=name):
+            net_output = Net.conv(net_input, 1, 1, input_size[-1] // 4, 1, 1,
+                                  biased=True, relu=True, padding='SAME', name='d_s_conv_1')
 
-            # 使用attention
-            net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
+            net_output = tf.image.resize_nearest_neighbor(net_output, output_size[:2])
+            net_output = Net.conv(net_output, 3, 3, input_size[-1] // 4, 1, 1,
+                                  biased=True, relu=True, padding='SAME', name='d_s_conv_2')
 
-            # 分类
-            class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-            classes.append(class_fc)
+            net_output_o = Net.conv(net_output, 1, 1, output_size[-1], 1, 1,
+                                    biased=True, relu=True, name='d_s_conv_3')
 
-            # 解码模块，输入特征图，输出分类结果和分割结果
-            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[2], self.filter_number, self.last_pool_size, 2)
-            segments.append(net_input_conv6_n_4_sigmoid)
+            net_output = Net.conv(net_output_o, 3, 3, 2, 1, 1, biased=True, relu=False, name='d_s_conv_4')
+            pass
+        return net_output, net_output_o
+
+    def build(self):
+
+        # 提取特征，属于公共部分
+        block1, block2, block3, block4 = self._feature(self.input_data)
+        blocks = [block1, block2, block3, block4]
+        block4_shape = Tools.get_shape(block4)  # 45, 512
+        block3_shape = Tools.get_shape(block3)  # 90, 512
+        block2_shape = Tools.get_shape(block2)  # 180, 256
+        block1_shape = Tools.get_shape(block1)  # 360, 128
+
+        adds = []
+        adds_in_block = []
+        adds_in_2 = []
+        adds = []
+        temps = []
+        segments = []
+        segments_output = []
+
+        ######################################################
+        # 确定初始attention的输入点：建议在进入attention时输入
+        ######################################################
+
+        with tf.variable_scope(name_or_scope="attention_4"):
+            # 0
+            net_segment_output, temp = self._segment(block4, block4_shape, block3_shape, name="segment_side_4")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
+
+            net_output = self._decoder(block4, block4_shape, block3_shape, name="4")
+            segments_output.append(net_output)
             pass
 
         with tf.variable_scope(name_or_scope="attention_3"):
-            # attention（一个通道）
-            attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[1]
-            attentions.append(attention)
+            # 1  ==>
+            # net_segment_block_output, temp = self._segment(block3, block3_shape, block2_shape, name="segment_side_3_block")
+            # temps.append(temp)
+            # segments.append(net_segment_block_output)  # segment
 
-            # 使用attention
-            net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
+            # 2
+            # block3_add = Net.add([block3, net_output], name='add')
+            block3_add = net_output
+            adds_in_block.append(block3)
+            adds_in_2.append(net_output)
+            adds.append(block3_add)
 
-            # 分类
-            class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-            classes.append(class_fc)
+            net_segment_output, temp = self._segment(block3_add, block3_shape, block2_shape, name="segment_side_3")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
 
-            # 解码模块，输入特征图，输出分类结果和分割结果
-            segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-                net_input_feature, mask_data[3], self.filter_number, self.last_pool_size, 2)
-            segments.append(net_input_conv6_n_4_sigmoid)
+            net_output = self._decoder(block3_add, block3_shape, block2_shape, name="3")
+            segments_output.append(net_output)
             pass
 
-        attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[1]
-        attentions.append(attention)
+        with tf.variable_scope(name_or_scope="attention_2"):
+            # 3  ==>
+            # net_segment_block_output, temp = self._segment(block2, block2_shape, block1_shape, name="segment_side_2_block")
+            # temps.append(temp)
+            # segments.append(net_segment_block_output)  # segment
 
-        # 使用attention
-        net_input_feature = tf.multiply(net_input_feature, attention, name="class_attention_multiply")
+            # 4
+            # block2_add = Net.add([block2, net_output], name="add")
+            block2_add = net_output
+            adds_in_block.append(block2)
+            adds_in_2.append(net_output)
+            adds.append(block2_add)
 
-        class_fc = self._classifies(net_input_feature, self.last_pool_size, self.filter_number, self.num_classes)
-        classes.append(class_fc)
+            net_segment_output, temp = self._segment(block2_add, block2_shape, block1_shape, name="segment_side_2")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
 
-        return segments, attentions, classes
+            net_output = self._decoder(block2_add, block2_shape, block1_shape, name="2")
+            segments_output.append(net_output)
+            pass
 
-    # 从大变小
-    def build_large2small(self):
+        with tf.variable_scope(name_or_scope="attention_1"):
+            # 5  ==>
+            # net_segment_block_output, temp = self._segment(block1, block1_shape, block1_shape, name="segment_side_1_block")
+            # temps.append(temp)
+            # segments.append(net_segment_block_output)  # segment
+
+            # 6
+            block1_add = Net.add([block1, net_output], name="add")
+            adds_in_block.append(block1)
+            adds_in_2.append(net_output)
+            adds.append(block1_add)
+
+            net_segment_output, temp = self._segment(block1_add, block1_shape, block1_shape, name="segment_side_1")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
+
+            net_output = self._decoder(block1_add, block1_shape, block1_shape, name="1")
+            segments_output.append(net_output)
+            pass
+
+        # 7
+        net_output = Net.conv(net_output, 3, 3, 2, 1, 1, biased=True, relu=False, name='attention_0')
+        segments.append(net_output)  # segment
+
+        features = {"block": blocks, "segment": segments_output,
+                    "temp": temps, "add": adds, "adds_in_block": adds_in_block, "adds_in_2": adds_in_2}
+        return segments, features
+
+    def build_old(self):
+
         # 提取特征，属于公共部分
-        input_feature = self._feature(self.input_data, self.filter_number)
+        block1, block2, block3, block4 = self._feature(self.input_data)
+        blocks = [block1, block2, block3, block4]
+        block4_shape = Tools.get_shape(block4)  # 45, 512
+        block3_shape = Tools.get_shape(block3)  # 90, 512
+        block2_shape = Tools.get_shape(block2)  # 180, 256
+        block1_shape = Tools.get_shape(block1)  # 360, 128
 
+        adds = []
+        adds_in_block = []
+        adds_in_2 = []
+        adds = []
+        temps = []
         segments = []
-        attentions = []
-        classes = []
+        segments_output = []
 
-        mask_data = tf.split(self.mask_data, num_or_size_splits=self.mask_data_num, axis=3)
+        ######################################################
+        # 确定初始attention的输入点：建议在进入attention时输入
+        ######################################################
 
-        # 解码模块，输入特征图，输出分类结果和分割结果
-        segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid, net_input_conv6_n_4_softmax = self._decoder(
-            input_feature, input_feature, mask_data[0], self.filter_number, self.num_segment)
-        segments.append(net_input_conv6_n_4_sigmoid)
+        with tf.variable_scope(name_or_scope="attention_4"):
+            # 0
+            net_segment_output, temp = self._segment(block4, block4_shape, block3_shape, name="segment_side_4")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
 
-        for i in range(1, self.mask_data_num):
-            with tf.variable_scope(name_or_scope="attention_{}".format(i)):
-                # attention（一个通道）
-                attention = tf.split(net_input_conv6_n_4_softmax,
-                                     num_or_size_splits=self.num_segment, axis=3)[self.segment_attention]
-                attentions.append(attention)
-
-                # 使用attention
-                attention_feature = tf.multiply(input_feature, attention, name="class_attention_multiply")
-
-                # 分类
-                class_fc = self._classifies(attention_feature, self.last_pool_size, self.filter_number, self.num_classes)
-                classes.append(class_fc)
-
-                # 解码模块，输入特征图，输出分类结果和分割结果
-                (segment_output, segment_output_relu, net_input_conv6_n_4_sigmoid,
-                 net_input_conv6_n_4_softmax) = self._decoder(
-                    input_feature, attention_feature, mask_data[i], self.filter_number,
-                    2 if self.mask_data_num - 1 == i else self.num_segment)
-                segments.append(net_input_conv6_n_4_sigmoid)
-                pass
+            net_output = self._decoder(block4, block4_shape, block3_shape, name="4")
+            segments_output.append(net_output)
             pass
 
-        attention = tf.split(net_input_conv6_n_4_softmax, num_or_size_splits=2, axis=3)[self.segment_attention]
-        attentions.append(attention)
+        with tf.variable_scope(name_or_scope="attention_3"):
+            # 1  ==>
+            # net_segment_block_output, temp = self._segment(block3, block3_shape, block2_shape, name="segment_side_3_block")
+            # temps.append(temp)
+            # segments.append(net_segment_block_output)  # segment
 
-        # 使用attention
-        attention_feature = tf.multiply(input_feature, attention, name="class_attention_multiply")
+            # 2
+            block3_add = Net.add([block3, net_output], name='add')
+            adds_in_block.append(block3)
+            adds_in_2.append(net_output)
+            adds.append(block3_add)
 
-        class_fc = self._classifies(attention_feature, self.last_pool_size, self.filter_number, self.num_classes)
-        classes.append(class_fc)
+            net_segment_output, temp = self._segment(block3_add, block3_shape, block2_shape, name="segment_side_3")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
 
-        return segments, attentions, classes
+            net_output = self._decoder(block3_add, block3_shape, block2_shape, name="3")
+            segments_output.append(net_output)
+            pass
+
+        with tf.variable_scope(name_or_scope="attention_2"):
+            # 3  ==>
+            # net_segment_block_output, temp = self._segment(block2, block2_shape, block1_shape, name="segment_side_2_block")
+            # temps.append(temp)
+            # segments.append(net_segment_block_output)  # segment
+
+            # 4
+            block2_add = Net.add([block2, net_output], name="add")
+            adds_in_block.append(block2)
+            adds_in_2.append(net_output)
+            adds.append(block2_add)
+
+            net_segment_output, temp = self._segment(block2_add, block2_shape, block1_shape, name="segment_side_2")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
+
+            net_output = self._decoder(block2_add, block2_shape, block1_shape, name="2")
+            segments_output.append(net_output)
+            pass
+
+        with tf.variable_scope(name_or_scope="attention_1"):
+            # 5  ==>
+            # net_segment_block_output, temp = self._segment(block1, block1_shape, block1_shape, name="segment_side_1_block")
+            # temps.append(temp)
+            # segments.append(net_segment_block_output)  # segment
+
+            # 6
+            block1_add = Net.add([block1, net_output], name="add")
+            adds_in_block.append(block1)
+            adds_in_2.append(net_output)
+            adds.append(block1_add)
+
+            net_segment_output, temp = self._segment(block1_add, block1_shape, block1_shape, name="segment_side_1")
+            temps.append(temp)
+            segments.append(net_segment_output)  # segment
+
+            net_output = self._decoder(block1_add, block1_shape, block1_shape, name="1")
+            segments_output.append(net_output)
+            pass
+
+        # 7
+        net_output = Net.conv(net_output, 3, 3, 2, 1, 1, biased=True, relu=False, name='attention_0')
+        segments.append(net_output)  # segment
+
+        features = {"block": blocks, "segment": segments_output,
+                    "temp": temps, "add": adds, "adds_in_block": adds_in_block, "adds_in_2": adds_in_2}
+        return segments, features
 
     pass
