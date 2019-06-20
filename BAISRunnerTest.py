@@ -149,7 +149,7 @@ class Inference(object):
 if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     data_dir = "./input"
-    which_image = "10"
+    which_image = "13"
     is_class = False
     input_size = 480
     if is_class:

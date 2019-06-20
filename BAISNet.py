@@ -129,11 +129,12 @@ class LinkNet(object):
         self.network_fn = nets_factory.get_network_fn("vgg_16", num_classes=None,
                                                       weight_decay=0.00004, is_training=True)
         logits, end_points = self.network_fn(net_input)
+        block0 = end_points['vgg_16/conv1/conv1_2']
         block1 = end_points['vgg_16/conv2/conv2_2']
         block2 = end_points['vgg_16/conv3/conv3_3']
         block3 = end_points['vgg_16/conv4/conv4_3']
         block4 = end_points['vgg_16/conv5/conv5_3']
-        return block1, block2, block3, block4
+        return block0, block1, block2, block3, block4
 
     def _decoder(self, net_input, input_size, output_size, name):
         with tf.variable_scope(name_or_scope=name):
@@ -168,8 +169,8 @@ class LinkNet(object):
     def build(self):
 
         # 提取特征，属于公共部分
-        block1, block2, block3, block4 = self._feature(self.input_data)
-        blocks = [block1, block2, block3, block4]
+        block0, block1, block2, block3, block4 = self._feature(self.input_data)
+        blocks = [block0, block1, block2, block3, block4]
         block4_shape = Tools.get_shape(block4)  # 45, 512
         block3_shape = Tools.get_shape(block3)  # 90, 512
         block2_shape = Tools.get_shape(block2)  # 180, 256
